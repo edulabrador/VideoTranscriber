@@ -3,10 +3,10 @@
   "private": true,
   "packageManager": "pnpm@9.6.0",
   "scripts": {
-    "dev": "concurrently -n web,api,cobalt -c blue,green,magenta \"pnpm --filter web dev\" \"uv run --project backend python -m uvicorn backend.api.app:app --reload --port 8000\" \"pnpm --dir services/cobalt/api start\"",
-    "build": "pnpm --filter web build",
+    "dev": "concurrently -n web,api,cobalt -c blue,green,magenta \"npm --prefix apps/web run dev\" \"uv run --project backend python -m uvicorn backend.api.app:app --reload --port 8000\" \"npm --prefix services/cobalt/api run start\"",
+    "build": "npm --prefix apps/web run build",
     "setup": "bash scripts/setup.sh",
-    "lint": "pnpm --filter web lint"
+    "lint": "npm --prefix apps/web run lint"
   },
   "devDependencies": {
     "concurrently": "^9.0.0"
