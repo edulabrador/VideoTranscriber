@@ -1,6 +1,7 @@
 {
   "name": "video-transcriber",
   "private": true,
+  "packageManager": "pnpm@9.6.0",
   "scripts": {
     "dev": "concurrently -n web,api,cobalt -c blue,green,magenta \"pnpm --filter web dev\" \"uv run --project backend python -m uvicorn backend.api.app:app --reload --port 8000\" \"pnpm --dir services/cobalt/api start\"",
     "build": "pnpm --filter web build",

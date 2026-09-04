@@ -55,9 +55,11 @@ Instala una sola vez:
 
 - [Git](https://git-scm.com/download/win)
 - [Node.js LTS](https://nodejs.org/)
-- pnpm mediante `corepack enable pnpm`
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - El controlador NVIDIA actualizado si se va a utilizar una GPU NVIDIA.
+
+El iniciador utiliza pnpm directamente si está instalado. Si no lo encuentra,
+lo prepara automáticamente mediante Corepack, incluido con Node.js en este equipo.
 
 Después descarga el proyecto:
 
