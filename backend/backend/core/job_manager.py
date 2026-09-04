@@ -37,16 +37,12 @@ _STAGE_PROGRESS: dict[JobStatus, int] = {
 class JobRecord:
     id: str
     status: JobStatus = "queued"
-    stage_message: str = "Queued"
+    stage_message: str = "En espera"
+    progress_percent: int = 0
     result: TranscriptionResult | None = None
     error: dict | None = None
     cancel_event: threading.Event = field(default_factory=threading.Event)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-    @property
-    def progress_percent(self) -> int:
-        return _STAGE_PROGRESS[self.status]
-
 
 class JobManager:
     def __init__(self) -> None:
@@ -63,18 +59,27 @@ class JobManager:
         with self._lock:
             return self._jobs.get(job_id)
 
-    def update_status(self, job_id: str, status: JobStatus, message: str) -> None:
+    def update_status(
+        self,
+        job_id: str,
+        status: JobStatus,
+        message: str,
+        progress_percent: int | None = None,
+    ) -> None:
         job = self.get_job(job_id)
         if job is not None:
             job.status = status
             job.stage_message = message
+            progress = _STAGE_PROGRESS[status] if progress_percent is None else progress_percent
+            job.progress_percent = max(0, min(100, progress))
 
     def set_result(self, job_id: str, result: TranscriptionResult) -> None:
         job = self.get_job(job_id)
         if job is not None:
             job.result = result
             job.status = "completed"
-            job.stage_message = "Done."
+            job.stage_message = "Transcripción completada."
+            job.progress_percent = 100
 
     def set_error(self, job_id: str, code: str, message: str, status: JobStatus = "failed") -> None:
         job = self.get_job(job_id)
@@ -82,6 +87,7 @@ class JobManager:
             job.status = status
             job.error = {"code": code, "message": message}
             job.stage_message = message
+            job.progress_percent = 100
 
     def request_cancel(self, job_id: str) -> bool:
         job = self.get_job(job_id)
@@ -89,6 +95,7 @@ class JobManager:
             return False
         job.cancel_event.set()
         job.status = "cancelling"
+        job.progress_percent = 99
         return True
 
 

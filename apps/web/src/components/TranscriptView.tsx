@@ -14,24 +14,31 @@ export function TranscriptView({ jobId, result }: { jobId: string; result: Trans
   const [showTimestamps, setShowTimestamps] = useState(true);
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-soft dark:border-stone-700 dark:bg-stone-900">
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <Badge>{result.language.toUpperCase()} ({Math.round(result.language_probability * 100)}%)</Badge>
-        <Badge>{formatTimestamp(result.duration)}</Badge>
-        <Badge>{result.word_count} words</Badge>
-        <Badge>{result.model_size} · {result.device}</Badge>
-        <label className="ml-auto flex items-center gap-2 text-stone-500 dark:text-stone-400">
+    <section className="flex flex-col gap-4 rounded-[1.75rem] border border-stone-200/80 bg-white/90 p-4 shadow-soft backdrop-blur dark:border-stone-800 dark:bg-stone-900/90 sm:p-6">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-brand-600 dark:text-brand-400">Resultado</p>
+          <h2 className="mt-1 text-xl font-extrabold">Transcripción</h2>
+        </div>
+        <label className="flex items-center gap-2 text-xs font-medium text-stone-500 dark:text-stone-400">
           <input
             type="checkbox"
             checked={showTimestamps}
             onChange={(e) => setShowTimestamps(e.target.checked)}
-            className="accent-orange-500"
+            className="accent-brand-500"
           />
-          Timestamps
+          Tiempos
         </label>
       </div>
 
-      <div className="max-h-96 space-y-2 overflow-y-auto pr-1 text-sm leading-relaxed text-stone-700 dark:text-stone-200">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <Badge>Idioma: {result.language.toUpperCase()} ({Math.round(result.language_probability * 100)} %)</Badge>
+        <Badge>Duración: {formatTimestamp(result.duration)}</Badge>
+        <Badge>{result.word_count} palabras</Badge>
+        <Badge>Modelo: {result.model_size} · {result.device}</Badge>
+      </div>
+
+      <div className="max-h-96 space-y-2 overflow-y-auto rounded-2xl bg-stone-50 p-4 text-sm leading-7 text-stone-700 dark:bg-stone-950/55 dark:text-stone-200 sm:p-5">
         {result.segments.map((seg, i) => (
           <p key={i}>
             {showTimestamps && (
@@ -42,11 +49,11 @@ export function TranscriptView({ jobId, result }: { jobId: string; result: Trans
         ))}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-stone-100 pt-4 dark:border-stone-800">
+      <div className="flex flex-wrap items-center gap-2">
         <CopyButton text={result.text} />
         <ExportMenu jobId={jobId} />
       </div>
-    </div>
+    </section>
   );
 }
 

@@ -1,8 +1,8 @@
 <div align="center">
 
-# Instagram Transcriber
+# VideoTranscriber
 
-**Turn any Instagram Reel or Post into a clean, timestamped transcript — fully offline, fully free.**
+**Turn Instagram, TikTok, and X videos into clean, timestamped transcripts.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
@@ -12,12 +12,13 @@
 
 ---
 
-Paste an Instagram URL (or drop a local video/audio file), and get back a
+Paste an Instagram, TikTok, or X URL (or drop a local video/audio file), and get back a
 searchable, timestamped transcript you can copy or export — from a clean web
 app or straight from your terminal. No API keys, no subscriptions, no data
 leaving your machine. Speech recognition runs locally using
-[faster-whisper](https://github.com/SYSTRAN/faster-whisper); downloading is
-handled by [yt-dlp](https://github.com/yt-dlp/yt-dlp); audio processing by
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper). Instagram downloading is
+handled by [yt-dlp](https://github.com/yt-dlp/yt-dlp), with a separate local
+[Cobalt](https://github.com/imputnet/cobalt) service for TikTok and fallback downloads, and audio processing by
 [FFmpeg](https://ffmpeg.org/). This project just wires proven tools together
 into something pleasant to use.
 
@@ -48,8 +49,8 @@ into something pleasant to use.
 - **Recent history**, shared between the web app and the CLI
 - **Works entirely from the terminal** if you don't want a browser open
 - **Dark mode**, responsive layout, no account or sign-in required
-- **Runs 100% locally** — nothing is uploaded anywhere except the original
-  fetch from Instagram
+- **Runs locally** — media is fetched only from its original platform and
+  speech recognition stays on your machine
 
 ## Quickstart
 
@@ -73,8 +74,8 @@ You'll need four things. If you already have them, skip ahead.
 ### 2. Clone and set up
 
 ```bash
-git clone https://github.com/yusosadick/instagram-transcriber.git
-cd instagram-transcriber
+git clone https://github.com/edulabrador/VideoTranscriber.git
+cd VideoTranscriber
 ./scripts/setup.sh
 ```
 
@@ -90,16 +91,16 @@ transcribe something (see [Hardware notes](#hardware-notes) for sizes).
 pnpm dev
 ```
 
-This starts both the backend API (`http://localhost:8000`) and the web app
-(`http://localhost:5173`) together. Open the web app in your browser and
-paste an Instagram Reel or Post URL.
+This starts Cobalt (`http://localhost:9000`), the backend API
+(`http://localhost:8000`), and the web app (`http://localhost:5173`) together.
+Open the web app and paste an Instagram, TikTok, or X video URL.
 
 That's it — first transcription will take a bit longer while the model
 downloads (once, ever, after that it's cached and reused).
 
 ## Using the web app
 
-1. Paste an Instagram Reel/Post URL into the input box (or click **Upload
+1. Paste an Instagram, TikTok, or X video URL into the input box (or click **Upload
    file** to drag & drop a local audio/video file instead)
 2. Click **Transcribe**
 3. Watch the progress bar — you can cancel at any point
@@ -111,7 +112,7 @@ downloads (once, ever, after that it's cached and reused).
 
 ## Using the CLI
 
-No browser needed. From the `instagram-transcriber` directory:
+No browser needed. From the `VideoTranscriber` directory:
 
 ```bash
 uv run --project backend transcriber "https://www.instagram.com/reel/XXXXXXX/"
@@ -155,6 +156,7 @@ needed:
 | Variable | Default | Description |
 |---|---|---|
 | `COOKIES_FILE` | unset | Path to a `cookies.txt` for private content — see below |
+| `COBALT_API_URL` | `http://127.0.0.1:9000` | Local Cobalt service used for TikTok and fallback downloads |
 | `MODEL_SIZE` | `auto` | `auto` picks the best model for your hardware, or set a specific [faster-whisper model name](https://github.com/SYSTRAN/faster-whisper#model-conversion) (e.g. `tiny`, `small`, `medium`, `large-v3`) |
 | `DEVICE` | `auto` | `auto` / `cpu` / `cuda` |
 | `COMPUTE_TYPE` | `auto` | CTranslate2 compute type override (e.g. `int8`, `float16`) |
@@ -290,6 +292,7 @@ pleasant to maintain:
 This project is a thin, opinionated integration layer over:
 
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) — media download
+- [Cobalt](https://github.com/imputnet/cobalt) — local TikTok and X download service, licensed separately under AGPL-3.0
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — speech
   recognition, including bundled Silero VAD and word-level timestamps
 - [FFmpeg](https://ffmpeg.org/) — audio extraction and conversion

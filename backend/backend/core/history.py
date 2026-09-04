@@ -19,9 +19,10 @@ class HistoryItem:
 
 
 class HistoryStore:
-    def __init__(self, path: Path, max_entries: int):
+    def __init__(self, path: Path, max_entries: int, output_dir: Path):
         self._path = path
         self._max_entries = max_entries
+        self._output_dir = output_dir
         self._lock = threading.Lock()
 
     def _read(self) -> list[dict]:
@@ -45,7 +46,14 @@ class HistoryStore:
 
     def list_entries(self) -> list[dict]:
         with self._lock:
-            return self._read()
+            entries = self._read()
+            for entry in entries[:2]:
+                transcript_path = self._output_dir / entry["id"] / "transcript.txt"
+                try:
+                    entry["text"] = transcript_path.read_text(encoding="utf-8")
+                except OSError:
+                    pass
+            return entries
 
     def delete_entry(self, item_id: str) -> bool:
         with self._lock:
@@ -57,4 +65,8 @@ class HistoryStore:
             return True
 
 
-history_store = HistoryStore(settings.history_file, settings.max_history_entries)
+history_store = HistoryStore(
+    settings.history_file,
+    settings.max_history_entries,
+    settings.output_dir,
+)

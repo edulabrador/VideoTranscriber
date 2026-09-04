@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -14,9 +15,18 @@ class Settings(BaseSettings):
     history_file: Path = REPO_ROOT / "backend" / "data" / "history.json"
 
     cookies_file: Path | None = None
+    cobalt_api_url: str | None = "http://127.0.0.1:9000"
+
+    @field_validator("cookies_file", "cobalt_api_url", mode="before")
+    @classmethod
+    def empty_optional_setting_is_none(cls, value):
+        return None if value == "" else value
+
     model_size: str = "auto"
     device: str = "auto"
     compute_type: str = "auto"
+    batch_size: int = 4
+    beam_size: int = 1
 
     cors_origins: list[str] = ["http://localhost:5173"]
     max_history_entries: int = 50

@@ -29,5 +29,5 @@ class TranscriptionError(TranscriberError):
 class JobCancelledError(TranscriberError):
     code = "cancelled"
 
-    def __init__(self, message: str = "Job was cancelled"):
+    def __init__(self, message: str = "La transcripción se ha cancelado"):
         super().__init__(message)

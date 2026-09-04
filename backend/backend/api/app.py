@@ -17,13 +17,13 @@ logger = logging.getLogger(__name__)
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     if not check_ffmpeg_available():
         logger.warning(
-            "ffmpeg/ffprobe not found on PATH — downloads and transcription will fail "
-            "until ffmpeg is installed (see scripts/setup.sh)."
+            "No se encontraron ffmpeg/ffprobe en PATH. PyAV cubrirá la mayoría de archivos, "
+            "pero algunos formatos podrían fallar. Consulta scripts/setup.sh."
         )
     yield
 
 
-app = FastAPI(title="Instagram Transcriber API", lifespan=lifespan)
+app = FastAPI(title="VideoTranscriber API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

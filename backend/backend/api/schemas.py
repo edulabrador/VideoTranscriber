@@ -58,6 +58,7 @@ class HistoryItemSchema(BaseModel):
     duration: float
     word_count: int
     language: str
+    text: str | None = None
 
 
 class HealthResponse(BaseModel):

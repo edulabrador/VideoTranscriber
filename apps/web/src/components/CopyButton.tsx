@@ -7,9 +7,9 @@ export function CopyButton({ text }: { text: string }) {
     <button
       type="button"
       onClick={() => copy(text)}
-      className="rounded-xl border border-stone-200 px-4 py-2 text-sm font-medium text-stone-600 shadow-soft transition hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
+      className="rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-600 shadow-sm transition hover:border-brand-300 hover:text-brand-600 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:border-brand-700 dark:hover:text-brand-400"
     >
-      {copied ? "Copied!" : "Copy transcript"}
+      {copied ? "¡Copiado!" : "Copiar texto"}
     </button>
   );
 }

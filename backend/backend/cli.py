@@ -13,17 +13,17 @@ from backend.core.validators import is_instagram_url
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
 _STAGE_LABELS = {
-    "downloading": "Downloading...",
-    "extracting_audio": "Extracting audio...",
-    "transcribing": "Transcribing...",
-    "completed": "Done.",
+    "downloading": "Descargando vídeo...",
+    "extracting_audio": "Preparando el audio...",
+    "transcribing": "Transcribiendo audio...",
+    "completed": "Transcripción completada.",
 }
 
 
 def _make_stage_printer():
     printed: set[str] = set()
 
-    def on_stage(status: str, _message: str) -> None:
+    def on_stage(status: str, _message: str, _progress: int | None = None) -> None:
         label = _STAGE_LABELS.get(status)
         if label and status not in printed:
             typer.echo(label)
@@ -52,17 +52,17 @@ def _copy_to_clipboard(text: str) -> bool:
 @app.command()
 def main(
     source: str = typer.Argument(
-        ..., help="Instagram Reel/Post URL, or a path to a local audio/video file"
+        ..., help="Enlace de Instagram, TikTok o Twitter (X), o ruta de un archivo local"
     ),
-    model: str = typer.Option(None, "--model", help="Override the whisper model size"),
+    model: str = typer.Option(None, "--model", help="Cambiar el tamaño del modelo Whisper"),
     cookies: Path = typer.Option(
-        None, "--cookies", help="Path to a cookies.txt for private/login-gated content"
+        None, "--cookies", help="Ruta de cookies.txt para contenido que requiere iniciar sesión"
     ),
     output_dir: Path = typer.Option(
-        None, "--output-dir", help="Directory to write transcript.txt/subtitles.srt/transcript.json"
+        None, "--output-dir", help="Carpeta donde guardar transcript.txt, subtitles.srt y transcript.json"
     ),
     no_clipboard: bool = typer.Option(
-        False, "--no-clipboard", help="Skip copying the transcript to the clipboard"
+        False, "--no-clipboard", help="No copiar la transcripción al portapapeles"
     ),
 ) -> None:
     if model:
@@ -79,7 +79,7 @@ def main(
         job_source = FileSource(path=path, original_name=path.name)
     else:
         typer.echo(
-            "Error: Not a valid Instagram Reel/Post URL, and no local file found at that path",
+            "Error: el enlace no es válido y no se encontró ningún archivo local en esa ruta",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -97,7 +97,7 @@ def main(
         )
     except TranscriberError as exc:
         if exc.code == "cancelled":
-            typer.echo("Cancelled.")
+            typer.echo("Cancelado.")
             raise typer.Exit(code=0) from None
         typer.echo(f"Error: {exc.message}", err=True)
         raise typer.Exit(code=1) from None
@@ -105,9 +105,9 @@ def main(
     if not no_clipboard:
         _copy_to_clipboard(result.text)
 
-    typer.echo(f"\nLanguage: {result.language} ({result.language_probability:.0%} confidence)")
-    typer.echo(f"Duration: {result.duration:.1f}s   Words: {result.word_count}")
-    typer.echo(f"Saved to: {out_dir}/transcript.txt, subtitles.srt, transcript.json")
+    typer.echo(f"\nIdioma: {result.language} ({result.language_probability:.0%} de confianza)")
+    typer.echo(f"Duración: {result.duration:.1f} s   Palabras: {result.word_count}")
+    typer.echo(f"Guardado en: {out_dir}/transcript.txt, subtitles.srt, transcript.json")
 
 
 if __name__ == "__main__":

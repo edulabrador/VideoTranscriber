@@ -1,14 +1,25 @@
 import logging
+import os
+import sys
 from functools import lru_cache
+from pathlib import Path
 
-import ctranslate2
-from faster_whisper import WhisperModel
+_NVIDIA_DLL_HANDLES: list[object] = []
+if os.name == "nt":
+    nvidia_root = Path(sys.prefix) / "Lib" / "site-packages" / "nvidia"
+    dll_dirs = sorted(nvidia_root.glob("*/bin"))
+    os.environ["PATH"] = os.pathsep.join([*(str(path) for path in dll_dirs), os.environ["PATH"]])
+    for dll_dir in dll_dirs:
+        _NVIDIA_DLL_HANDLES.append(os.add_dll_directory(str(dll_dir)))
 
-from backend.config import settings
+import ctranslate2  # noqa: E402
+from faster_whisper import WhisperModel  # noqa: E402
+
+from backend.config import settings  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-CUDA_DEFAULT_MODEL = "large-v3"
+CUDA_DEFAULT_MODEL = "large-v3-turbo"
 CPU_DEFAULT_MODEL = "large-v3-turbo"
 
 

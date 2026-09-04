@@ -2,6 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply min-w-[320px] bg-[#f5fbff] font-sans text-stone-900 antialiased dark:bg-[#08111f] dark:text-stone-100;
+  }
+
+  button,
+  input {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-stone-950;
+  }
+
+  ::selection {
+    @apply bg-brand-200 text-stone-950;
+  }
+}
+
 html {
   font-family: theme("fontFamily.sans");
 }

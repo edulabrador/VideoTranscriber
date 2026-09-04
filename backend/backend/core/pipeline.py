@@ -1,18 +1,19 @@
 import shutil
 import threading
+from math import ceil
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.config import settings
-from backend.core import audio, downloader, validators
+from backend.core import downloader, validators
 from backend.core.errors import TranscriberError
 from backend.core.exporter import write_json, write_srt, write_txt
 from backend.core.history import HistoryItem, history_store
 from backend.core.transcriber import TranscriptionResult, transcribe_audio
 
-StageCallback = Callable[[str, str], None]  # (status, message) -> None
+StageCallback = Callable[[str, str, int | None], None]
 
 
 @dataclass
@@ -29,7 +30,7 @@ class FileSource:
 Source = URLSource | FileSource
 
 
-def _noop_stage(_status: str, _message: str) -> None:
+def _noop_stage(_status: str, _message: str, _progress: int | None = None) -> None:
     pass
 
 
@@ -50,38 +51,60 @@ def run_pipeline(
         if isinstance(source, URLSource):
             validators.validate_instagram_url(source.url)
 
-            on_stage("downloading", "Downloading...")
+            on_stage("downloading", "Preparando la descarga...", 1)
+
+            def report_download(message: str, percent: int | None) -> None:
+                overall = 1 if percent is None else 1 + round(percent * 0.19)
+                on_stage("downloading", message, overall)
+
             download_result = downloader.download_media(
                 source.url,
                 job_temp_dir,
                 settings.cookies_file,
                 cancel_event,
-                on_progress=lambda msg: on_stage("downloading", msg),
+                on_progress=report_download,
+                cobalt_api_url=settings.cobalt_api_url,
             )
             raw_audio_path = download_result.audio_path
             title = download_result.title
             source_label = source.url
             source_type = "url"
+            transcription_start = 20
         else:
             raw_audio_path = source.path
             title = source.original_name
             source_label = source.original_name
             source_type = "file"
+            transcription_start = 0
 
-        on_stage("extracting_audio", "Extracting audio...")
-        normalized_path = job_temp_dir / "audio_16k.wav"
-        audio.normalize_to_wav16k_mono(raw_audio_path, normalized_path)
+        on_stage("transcribing", "Analizando el audio para calcular el progreso...", transcription_start)
 
-        on_stage("transcribing", "Transcribing...")
+        def report_transcription(percent: int, eta_seconds: int | None) -> None:
+            overall = transcription_start + round(percent * (98 - transcription_start) / 100)
+            if eta_seconds is None:
+                remaining = "Calculando el tiempo restante."
+            elif eta_seconds < 60:
+                remaining = "Queda menos de 1 minuto."
+            else:
+                remaining = f"Quedan aproximadamente {ceil(eta_seconds / 60)} minutos."
+            on_stage(
+                "transcribing",
+                f"Transcribiendo audio: {percent} %. {remaining}",
+                overall,
+            )
+
         result = transcribe_audio(
-            normalized_path,
+            raw_audio_path,
             settings.model_size,
             settings.device,
             settings.compute_type,
             cancel_event,
+            settings.batch_size,
+            settings.beam_size,
+            report_transcription,
         )
 
-        on_stage("exporting", "Exporting...")
+        on_stage("exporting", "Preparando los archivos...", 99)
         created_at = datetime.now(timezone.utc).isoformat()
         write_txt(result, output_dir / "transcript.txt")
         write_srt(result, output_dir / "subtitles.srt")
@@ -100,11 +123,11 @@ def run_pipeline(
             )
         )
 
-        on_stage("completed", "Done.")
+        on_stage("completed", "Transcripción completada.", 100)
         return result
     except TranscriberError:
         raise
     except Exception as exc:  # noqa: BLE001 - single boundary that wraps any unexpected failure
-        raise TranscriberError(f"Unexpected error — {exc}") from exc
+        raise TranscriberError(f"Se produjo un error inesperado: {exc}") from exc
     finally:
         shutil.rmtree(job_temp_dir, ignore_errors=True)

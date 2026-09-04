@@ -1,6 +1,5 @@
 import asyncio
 import shutil
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -18,7 +17,7 @@ from backend.core.audio import check_ffmpeg_available
 from backend.core.errors import TranscriberError, UnsupportedURLError
 from backend.core.history import history_store
 from backend.core.job_manager import job_manager
-from backend.core.model_manager import select_device_and_compute_type
+from backend.core.model_manager import resolve_compute_type, select_device_and_compute_type
 from backend.core.pipeline import FileSource, URLSource, run_pipeline
 from backend.core.validators import validate_instagram_url
 
@@ -36,8 +35,8 @@ def _run_job(job_id: str, source) -> None:
     if job is None:
         return
 
-    def on_stage(status: str, message: str) -> None:
-        job_manager.update_status(job_id, status, message)
+    def on_stage(status: str, message: str, progress: int | None = None) -> None:
+        job_manager.update_status(job_id, status, message, progress)
 
     try:
         result = run_pipeline(job_id, source, cancel_event=job.cancel_event, on_stage=on_stage)
@@ -66,7 +65,7 @@ async def create_job_from_upload(file: UploadFile) -> JobResponse:
     if not file.content_type or not (
         file.content_type.startswith("audio/") or file.content_type.startswith("video/")
     ):
-        raise HTTPException(status_code=400, detail="Only audio or video files are supported")
+        raise HTTPException(status_code=400, detail="Solo se admiten archivos de audio o vídeo")
 
     job = job_manager.create_job()
     upload_dir = settings.temp_dir / job.id
@@ -75,7 +74,7 @@ async def create_job_from_upload(file: UploadFile) -> JobResponse:
     with dest_path.open("wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    source = FileSource(path=dest_path, original_name=file.filename or "uploaded file")
+    source = FileSource(path=dest_path, original_name=file.filename or "archivo subido")
     asyncio.create_task(asyncio.to_thread(_run_job, job.id, source))
     return JobResponse(id=job.id, status=job.status)
 
@@ -84,7 +83,7 @@ async def create_job_from_upload(file: UploadFile) -> JobResponse:
 async def get_job_status(job_id: str) -> JobStatusResponse:
     job = job_manager.get_job(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="Unknown job id")
+        raise HTTPException(status_code=404, detail="No se encontró la transcripción")
     return JobStatusResponse(
         id=job.id,
         status=job.status,
@@ -98,9 +97,9 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
 async def cancel_job(job_id: str) -> JobResponse:
     job = job_manager.get_job(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="Unknown job id")
+        raise HTTPException(status_code=404, detail="No se encontró la transcripción")
     if job.status in ("completed", "failed", "cancelled"):
-        raise HTTPException(status_code=409, detail="Job already terminal")
+        raise HTTPException(status_code=409, detail="La transcripción ya ha terminado")
     job_manager.request_cancel(job_id)
     return JobResponse(id=job.id, status=job.status)
 
@@ -109,9 +108,9 @@ async def cancel_job(job_id: str) -> JobResponse:
 async def get_job_result(job_id: str) -> TranscriptResultSchema:
     job = job_manager.get_job(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="Unknown job id")
+        raise HTTPException(status_code=404, detail="No se encontró la transcripción")
     if job.status != "completed" or job.result is None:
-        raise HTTPException(status_code=409, detail="Job not completed yet")
+        raise HTTPException(status_code=409, detail="La transcripción todavía no ha terminado")
     result = job.result
     return TranscriptResultSchema(
         segments=[
@@ -137,10 +136,10 @@ async def get_job_result(job_id: str) -> TranscriptResultSchema:
 async def download_export(job_id: str, fmt: str) -> FileResponse:
     filename = _ALLOWED_EXPORT_FORMATS.get(fmt)
     if filename is None:
-        raise HTTPException(status_code=404, detail="Unknown export format")
+        raise HTTPException(status_code=404, detail="El formato de exportación no es compatible")
     path = settings.output_dir / job_id / filename
     if not path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail="No se encontró el archivo")
     return FileResponse(path, filename=filename)
 
 
@@ -156,7 +155,8 @@ async def delete_history_item(item_id: str) -> None:
 
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
-    device, compute_type = select_device_and_compute_type(settings.device)
+    device, _ = select_device_and_compute_type(settings.device)
+    compute_type = resolve_compute_type(settings.compute_type, device)
     return HealthResponse(
         status="ok",
         ffmpeg=check_ffmpeg_available(),

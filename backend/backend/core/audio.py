@@ -26,7 +26,7 @@ def probe_duration(path: Path) -> float:
         text=True,
     )
     if result.returncode != 0:
-        raise AudioExtractionError(f"ffprobe failed — {result.stderr.strip()[-500:]}")
+        raise AudioExtractionError(f"No se pudo analizar el archivo con ffprobe: {result.stderr.strip()[-500:]}")
     data = json.loads(result.stdout)
     return float(data["format"]["duration"])
 
@@ -50,5 +50,5 @@ def normalize_to_wav16k_mono(input_path: Path, output_path: Path) -> Path:
         text=True,
     )
     if result.returncode != 0 or not output_path.exists():
-        raise AudioExtractionError(f"Audio extraction failed — {result.stderr.strip()[-500:]}")
+        raise AudioExtractionError(f"No se pudo preparar el audio: {result.stderr.strip()[-500:]}")
     return output_path

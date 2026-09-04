@@ -24,7 +24,7 @@ export function CancelButton() {
       disabled={cancelling}
       className="rounded-xl border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-600 transition hover:bg-stone-50 disabled:opacity-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
     >
-      {cancelling ? "Cancelling..." : "Cancel"}
+      {cancelling ? "Cancelando..." : "Cancelar"}
     </button>
   );
 }

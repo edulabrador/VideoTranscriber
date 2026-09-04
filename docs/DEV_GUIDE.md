@@ -10,7 +10,7 @@ backend/backend/
   api/                       FastAPI app, routes, Pydantic schemas
   core/
     errors.py                Typed exception hierarchy
-    validators.py             Instagram URL validation
+    validators.py             Supported social-video URL validation
     downloader.py             yt-dlp wrapper
     audio.py                  ffmpeg wrapper (normalize, probe, availability)
     model_manager.py          hardware detection + model caching

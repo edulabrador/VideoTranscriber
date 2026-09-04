@@ -1,7 +1,7 @@
 [project]
-name = "instagram-transcriber"
+name = "video-transcriber"
 version = "0.1.0"
-description = "Local-first Instagram Reel/Post transcriber (yt-dlp + faster-whisper)"
+description = "Local-first Instagram, TikTok, and X video transcriber"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",
@@ -16,6 +16,8 @@ dependencies = [
   # faster-whisper's VAD uses onnxruntime; pinned below 1.24 because newer
   # onnxruntime releases dropped macOS x86_64 (Intel) wheels entirely.
   "onnxruntime<1.24",
+  "nvidia-cublas-cu12==12.9.2.10",
+  "nvidia-cudnn-cu12==9.22.0.52",
 ]
 
 [project.optional-dependencies]

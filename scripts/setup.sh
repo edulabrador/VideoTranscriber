@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-echo "== Instagram Transcriber setup =="
+echo "== VideoTranscriber setup =="
 
 missing=0
 
@@ -54,6 +54,16 @@ uv sync --project backend
 echo ""
 echo "-- Installing frontend dependencies (pnpm install) --"
 pnpm install
+
+if [[ ! -f services/cobalt/api/package.json ]]; then
+  echo ""
+  echo "-- Downloading Cobalt --"
+  git clone --depth 1 https://github.com/imputnet/cobalt.git services/cobalt
+fi
+
+echo ""
+echo "-- Installing Cobalt dependencies --"
+pnpm --dir services/cobalt install --frozen-lockfile
 
 mkdir -p models output temp
 

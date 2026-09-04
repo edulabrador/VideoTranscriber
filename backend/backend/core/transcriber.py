@@ -1,9 +1,15 @@
 import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from faster_whisper import BatchedInferencePipeline
+
 from backend.core.errors import JobCancelledError, TranscriptionError
 from backend.core.model_manager import get_model, resolve_compute_type, resolve_model_size, select_device_and_compute_type
+
+ProgressCallback = Callable[[int, int | None], None]
 
 
 @dataclass
@@ -42,6 +48,9 @@ def transcribe_audio(
     device_preference: str,
     compute_type_preference: str,
     cancel_event: threading.Event,
+    batch_size: int = 1,
+    beam_size: int = 1,
+    on_progress: ProgressCallback | None = None,
 ) -> TranscriptionResult:
     device, _ = select_device_and_compute_type(device_preference)
     model_size = resolve_model_size(model_size_preference, device)
@@ -50,17 +59,23 @@ def transcribe_audio(
     try:
         model = get_model(model_size, device, compute_type)
     except Exception as exc:  # noqa: BLE001 - surface as a typed transcription error
-        raise TranscriptionError(f"Could not load whisper model — {exc}") from exc
+        raise TranscriptionError(f"No se pudo cargar el modelo de transcripción: {exc}") from exc
 
     try:
-        segment_iter, info = model.transcribe(
-            str(audio_path),
-            vad_filter=True,
-            word_timestamps=True,
-        )
+        transcriber = BatchedInferencePipeline(model=model) if device == "cuda" and batch_size > 1 else model
+        options = {
+            "vad_filter": True,
+            "word_timestamps": False,
+            "beam_size": beam_size,
+        }
+        if isinstance(transcriber, BatchedInferencePipeline):
+            options["batch_size"] = batch_size
+        segment_iter, info = transcriber.transcribe(str(audio_path), **options)
 
         segments: list[TranscriptSegment] = []
         text_parts: list[str] = []
+        started_at = time.monotonic()
+        last_progress = -1
         for seg in segment_iter:
             if cancel_event.is_set():
                 raise JobCancelledError()
@@ -73,10 +88,19 @@ def transcribe_audio(
                 TranscriptSegment(start=seg.start, end=seg.end, text=segment_text, words=words)
             )
             text_parts.append(segment_text)
+            if on_progress and info.duration > 0:
+                progress = min(99, max(0, round(seg.end * 100 / info.duration)))
+                if progress > last_progress:
+                    elapsed = time.monotonic() - started_at
+                    eta = round(elapsed * (100 - progress) / progress) if progress >= 2 else None
+                    on_progress(progress, eta)
+                    last_progress = progress
+        if on_progress:
+            on_progress(100, 0)
     except JobCancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 - wrap unexpected whisper/ctranslate2 errors
-        raise TranscriptionError(f"Transcription failed — {exc}") from exc
+        raise TranscriptionError(f"La transcripción falló: {exc}") from exc
 
     return TranscriptionResult(
         segments=segments,

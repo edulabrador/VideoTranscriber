@@ -12,7 +12,7 @@ export class ApiError extends Error {
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let code = "request_failed";
-    let message = res.statusText;
+    let message = "No se pudo completar la solicitud";
     try {
       const body = await res.json();
       message = body.detail?.message ?? body.detail ?? message;
@@ -25,13 +25,21 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
+async function fetchApi(path: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(`${BASE_URL}${path}`, init);
+  } catch {
+    throw new ApiError("network_error", "No se pudo conectar con el servidor local.");
+  }
+}
+
 export async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`);
+  const res = await fetchApi(path);
   return handleResponse<T>(res);
 }
 
 export async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetchApi(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -40,13 +48,13 @@ export async function postJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function postForm<T>(path: string, form: FormData): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, { method: "POST", body: form });
+  const res = await fetchApi(path, { method: "POST", body: form });
   return handleResponse<T>(res);
 }
 
 export async function del(path: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}${path}`, { method: "DELETE" });
-  if (!res.ok) throw new ApiError("request_failed", res.statusText);
+  const res = await fetchApi(path, { method: "DELETE" });
+  if (!res.ok) throw new ApiError("request_failed", "No se pudo eliminar el elemento");
 }
 
 export function downloadFileUrl(path: string): string {

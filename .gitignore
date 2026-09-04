@@ -3,6 +3,7 @@
 /output/
 /temp/
 /backend/data/
+/services/cobalt/
 
 # Python
 .venv/

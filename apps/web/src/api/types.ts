@@ -60,6 +60,7 @@ export interface HistoryItem {
   duration: number;
   word_count: number;
   language: string;
+  text?: string;
 }
 
 export interface HealthResponse {
