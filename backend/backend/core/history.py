@@ -2,8 +2,20 @@ import json
 import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from backend.config import settings
+from backend.core.exporter import read_json
+from backend.core.transcriber import TranscriptionProfile, TranscriptionResult
+
+_QUALITY_RANK = {"compact": 0, "balanced": 1, "best": 2}
+
+
+def _source_key(source: str) -> str:
+    parsed = urlsplit(source.strip())
+    if parsed.scheme not in {"http", "https"}:
+        return source.strip()
+    return f"{parsed.netloc.lower()}{parsed.path.rstrip('/')}"
 
 
 @dataclass
@@ -54,6 +66,33 @@ class HistoryStore:
                 except OSError:
                     pass
             return entries
+
+    def find_cached(
+        self,
+        source: str,
+        profile: TranscriptionProfile,
+        audio_quality: str,
+    ) -> tuple[str, TranscriptionResult] | None:
+        source_key = _source_key(source)
+        with self._lock:
+            entries = self._read()
+
+        for entry in entries:
+            if _source_key(entry.get("source", "")) != source_key:
+                continue
+            transcript_path = self._output_dir / entry["id"] / "transcript.json"
+            try:
+                payload = json.loads(transcript_path.read_text(encoding="utf-8"))
+                cached_profile = payload.get("profile", "balanced")
+                cached_quality = payload.get("audio_quality", "best")
+                quality_is_sufficient = _QUALITY_RANK.get(cached_quality, 0) >= _QUALITY_RANK[
+                    audio_quality
+                ]
+                if cached_profile == profile and quality_is_sufficient:
+                    return entry["id"], read_json(transcript_path)
+            except (KeyError, OSError, ValueError, json.JSONDecodeError):
+                continue
+        return None
 
     def delete_entry(self, item_id: str) -> bool:
         with self._lock:

@@ -3,9 +3,9 @@ import { useDropzone } from "react-dropzone";
 
 import { postForm } from "../api/client";
 import { useJobContext } from "../context/JobContext";
-import type { JobResponse } from "../api/types";
+import type { JobResponse, TranscriptionProfile } from "../api/types";
 
-export function FileDropZone() {
+export function FileDropZone({ profile }: { profile: TranscriptionProfile }) {
   const { state, dispatch } = useJobContext();
   const [error, setError] = useState<string | null>(null);
   const jobActive = Boolean(
@@ -19,6 +19,7 @@ export function FileDropZone() {
       setError(null);
       const form = new FormData();
       form.append("file", file);
+      form.append("profile", profile);
       try {
         const job = await postForm<JobResponse>("/api/jobs/upload", form);
         dispatch({ type: "START_JOB", jobId: job.id });
@@ -26,7 +27,7 @@ export function FileDropZone() {
         setError(err instanceof Error ? err.message : "No se pudo subir el archivo");
       }
     },
-    [dispatch],
+    [dispatch, profile],
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({

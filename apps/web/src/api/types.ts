@@ -9,9 +9,13 @@ export type JobStatus =
   | "cancelling"
   | "cancelled";
 
+export type TranscriptionProfile = "fast" | "balanced" | "precise";
+export type AudioQuality = "compact" | "balanced" | "best";
+
 export interface JobResponse {
   id: string;
   status: JobStatus;
+  cached: boolean;
 }
 
 export interface JobError {
@@ -49,6 +53,9 @@ export interface TranscriptResult {
   text: string;
   model_size: string;
   device: string;
+  compute_type: string;
+  batch_size: number;
+  profile: TranscriptionProfile;
 }
 
 export interface HistoryItem {
@@ -68,6 +75,8 @@ export interface HealthResponse {
   ffmpeg: boolean;
   device: string;
   compute_type: string;
+  gpu_memory_mb: number | null;
+  batch_size: number;
 }
 
 export type ExportFormat = "txt" | "srt" | "json";

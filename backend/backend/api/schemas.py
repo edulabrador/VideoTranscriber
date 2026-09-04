@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 from backend.core.job_manager import JobStatus
@@ -5,11 +7,14 @@ from backend.core.job_manager import JobStatus
 
 class CreateJobFromUrlRequest(BaseModel):
     url: str
+    profile: Literal["fast", "balanced", "precise"] = "balanced"
+    audio_quality: Literal["compact", "balanced", "best"] = "balanced"
 
 
 class JobResponse(BaseModel):
     id: str
     status: JobStatus
+    cached: bool = False
 
 
 class JobErrorPayload(BaseModel):
@@ -47,6 +52,9 @@ class TranscriptResultSchema(BaseModel):
     text: str
     model_size: str
     device: str
+    compute_type: str
+    batch_size: int
+    profile: Literal["fast", "balanced", "precise"]
 
 
 class HistoryItemSchema(BaseModel):
@@ -66,3 +74,5 @@ class HealthResponse(BaseModel):
     ffmpeg: bool
     device: str
     compute_type: str
+    gpu_memory_mb: int | None
+    batch_size: int

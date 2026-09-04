@@ -3,13 +3,21 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from faster_whisper import BatchedInferencePipeline
 
 from backend.core.errors import JobCancelledError, TranscriptionError
-from backend.core.model_manager import get_model, resolve_compute_type, resolve_model_size, select_device_and_compute_type
+from backend.core.model_manager import (
+    get_model,
+    resolve_batch_size,
+    resolve_compute_type,
+    resolve_model_size,
+    select_device_and_compute_type,
+)
 
 ProgressCallback = Callable[[int, int | None], None]
+TranscriptionProfile = Literal["fast", "balanced", "precise"]
 
 
 @dataclass
@@ -36,10 +44,25 @@ class TranscriptionResult:
     text: str
     model_size: str
     device: str
+    compute_type: str
+    batch_size: int
+    profile: TranscriptionProfile
 
     @property
     def word_count(self) -> int:
         return len(self.text.split())
+
+
+def resolve_profile_settings(
+    profile: TranscriptionProfile,
+    configured_model: str,
+    configured_beam_size: int,
+) -> tuple[str, int]:
+    if profile == "fast":
+        return "small", 1
+    if profile == "precise":
+        return "large-v3", 5
+    return configured_model, configured_beam_size
 
 
 def transcribe_audio(
@@ -50,11 +73,19 @@ def transcribe_audio(
     cancel_event: threading.Event,
     batch_size: int = 1,
     beam_size: int = 1,
+    profile: TranscriptionProfile = "balanced",
     on_progress: ProgressCallback | None = None,
 ) -> TranscriptionResult:
     device, _ = select_device_and_compute_type(device_preference)
+    model_size_preference, beam_size = resolve_profile_settings(
+        profile,
+        model_size_preference,
+        beam_size,
+    )
+
     model_size = resolve_model_size(model_size_preference, device)
     compute_type = resolve_compute_type(compute_type_preference, device)
+    batch_size = resolve_batch_size(batch_size, device, profile)
 
     try:
         model = get_model(model_size, device, compute_type)
@@ -110,4 +141,7 @@ def transcribe_audio(
         text=" ".join(text_parts).strip(),
         model_size=model_size,
         device=device,
+        compute_type=compute_type,
+        batch_size=batch_size,
+        profile=profile,
     )

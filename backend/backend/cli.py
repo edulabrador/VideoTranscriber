@@ -71,6 +71,7 @@ def main(
         settings.cookies_file = cookies
 
     out_dir = output_dir or settings.output_dir
+    job_source: URLSource | FileSource
 
     if is_instagram_url(source):
         job_source = URLSource(url=source)

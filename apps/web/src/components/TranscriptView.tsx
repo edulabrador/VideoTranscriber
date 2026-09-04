@@ -4,6 +4,12 @@ import type { TranscriptResult } from "../api/types";
 import { CopyButton } from "./CopyButton";
 import { ExportMenu } from "./ExportMenu";
 
+const PROFILE_LABELS = {
+  fast: "Rápido",
+  balanced: "Equilibrado",
+  precise: "Preciso",
+};
+
 function formatTimestamp(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
@@ -35,7 +41,8 @@ export function TranscriptView({ jobId, result }: { jobId: string; result: Trans
         <Badge>Idioma: {result.language.toUpperCase()} ({Math.round(result.language_probability * 100)} %)</Badge>
         <Badge>Duración: {formatTimestamp(result.duration)}</Badge>
         <Badge>{result.word_count} palabras</Badge>
-        <Badge>Modelo: {result.model_size} · {result.device}</Badge>
+        <Badge>Perfil: {PROFILE_LABELS[result.profile]}</Badge>
+        <Badge>Modelo: {result.model_size} · {result.device} · lote {result.batch_size}</Badge>
       </div>
 
       <div className="max-h-96 space-y-2 overflow-y-auto rounded-2xl bg-stone-50 p-4 text-sm leading-7 text-stone-700 dark:bg-stone-950/55 dark:text-stone-200 sm:p-5">

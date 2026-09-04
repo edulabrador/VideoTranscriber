@@ -2,7 +2,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from backend.core.transcriber import TranscriptionResult
+from backend.core.transcriber import TranscriptSegment, TranscriptWord, TranscriptionResult
 
 
 def _srt_timestamp(seconds: float) -> str:
@@ -31,7 +31,15 @@ def write_srt(result: TranscriptionResult, path: Path) -> Path:
     return path
 
 
-def write_json(result: TranscriptionResult, path: Path, *, source: str, title: str, created_at: str) -> Path:
+def write_json(
+    result: TranscriptionResult,
+    path: Path,
+    *,
+    source: str,
+    title: str,
+    created_at: str,
+    audio_quality: str = "best",
+) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "source": source,
@@ -43,8 +51,39 @@ def write_json(result: TranscriptionResult, path: Path, *, source: str, title: s
         "word_count": result.word_count,
         "model_size": result.model_size,
         "device": result.device,
+        "compute_type": result.compute_type,
+        "batch_size": result.batch_size,
+        "profile": result.profile,
+        "audio_quality": audio_quality,
         "text": result.text,
         "segments": [asdict(seg) for seg in result.segments],
     }
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     return path
+
+
+def read_json(path: Path) -> TranscriptionResult:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return TranscriptionResult(
+        segments=[
+            TranscriptSegment(
+                start=segment["start"],
+                end=segment["end"],
+                text=segment["text"],
+                words=[
+                    TranscriptWord(start=word["start"], end=word["end"], word=word["word"])
+                    for word in segment.get("words", [])
+                ],
+            )
+            for segment in payload["segments"]
+        ],
+        language=payload["language"],
+        language_probability=payload["language_probability"],
+        duration=payload["duration"],
+        text=payload["text"],
+        model_size=payload["model_size"],
+        device=payload["device"],
+        compute_type=payload.get("compute_type", "unknown"),
+        batch_size=payload.get("batch_size", 1),
+        profile=payload.get("profile", "balanced"),
+    )

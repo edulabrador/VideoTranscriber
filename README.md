@@ -19,6 +19,11 @@ ejecuta localmente. No necesita claves de API ni una suscripción.
 - Enlaces de Instagram, TikTok, X y Twitter.
 - Archivos locales de audio y vídeo.
 - Aceleración mediante GPU NVIDIA CUDA, con retorno a CPU cuando corresponda.
+- Perfiles Rápido, Equilibrado y Preciso para elegir entre velocidad y exactitud.
+- Calidad de descarga configurable para reducir tiempo y consumo de red.
+- Ajuste automático y conservador del tamaño de lote según la VRAM disponible.
+- Cola de una sola transcripción GPU para evitar saturar la memoria gráfica.
+- Reutilización inmediata de transcripciones anteriores para el mismo enlace y perfil.
 - Progreso basado en bytes descargados y segundos de audio procesados.
 - Estimación del tiempo restante y cancelación de trabajos.
 - Exportación a TXT, SRT y JSON.
@@ -113,11 +118,26 @@ La configuración local está en `.env`. Este archivo nunca se sube a GitHub.
 | `MODEL_SIZE` | `auto` | Modelo de faster-whisper |
 | `DEVICE` | `auto` | Selección entre `cuda` y `cpu` |
 | `COMPUTE_TYPE` | `auto` | Precisión de cálculo |
-| `BATCH_SIZE` | `4` | Lotes de GPU. Un valor mayor consume más VRAM |
+| `BATCH_SIZE` | `0` | `0` ajusta los lotes automáticamente según la VRAM |
 | `BEAM_SIZE` | `1` | Prioriza velocidad. `5` puede mejorar precisión y tarda más |
 
 La configuración optimizada de este ordenador está guardada únicamente en su `.env`
 local. El repositorio mantiene valores automáticos compatibles con otros equipos.
+
+### Perfiles y rendimiento
+
+- **Rápido** usa el modelo `small` y prioriza terminar antes.
+- **Equilibrado** usa la configuración local. Es la opción recomendada para uso normal.
+- **Preciso** usa `large-v3`, una búsqueda más exhaustiva y un lote limitado para proteger la VRAM.
+
+La calidad Compacta descarga audio de menor tamaño. Equilibrada ofrece un término
+medio y Máxima conserva la mejor fuente disponible. Una transcripción ya guardada
+se reutiliza cuando coinciden el enlace y el perfil, siempre que la calidad empleada
+sea igual o superior a la solicitada.
+
+La aplicación no modifica frecuencias, voltajes, ventiladores ni límites de potencia.
+CUDA utiliza los mecanismos normales del controlador NVIDIA. Aun así, cualquier
+tarea intensiva puede elevar temporalmente el uso y la temperatura del equipo.
 
 ## Privacidad y archivos
 

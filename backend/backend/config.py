@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     model_size: str = "auto"
     device: str = "auto"
     compute_type: str = "auto"
-    batch_size: int = 4
+    batch_size: int = 0
     beam_size: int = 1
 
     cors_origins: list[str] = ["http://localhost:5173"]

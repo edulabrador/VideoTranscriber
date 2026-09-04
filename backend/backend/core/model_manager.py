@@ -1,5 +1,6 @@
 import logging
 import os
+import subprocess
 import sys
 from functools import lru_cache
 from pathlib import Path
@@ -45,10 +46,68 @@ def resolve_model_size(configured: str, device: str) -> str:
 def resolve_compute_type(configured: str, device: str) -> str:
     if configured != "auto":
         return configured
-    return "float16" if device == "cuda" else "int8"
+    if device != "cuda":
+        return "int8"
+
+    try:
+        supported = ctranslate2.get_supported_compute_types("cuda")
+    except Exception:  # noqa: BLE001 - CUDA capability probing is best effort
+        supported = {"float16"}
+
+    memory_mb = get_gpu_memory_mb()
+    if (memory_mb is None or memory_mb <= 8192) and "int8_float16" in supported:
+        return "int8_float16"
+    if "float16" in supported:
+        return "float16"
+    return "int8_float32" if "int8_float32" in supported else "float32"
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=1)
+def get_gpu_memory_mb() -> int | None:
+    if os.name != "nt" and ctranslate2.get_cuda_device_count() == 0:
+        return None
+    try:
+        completed = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        first_line = completed.stdout.strip().splitlines()[0]
+        return int(first_line)
+    except (FileNotFoundError, OSError, ValueError, IndexError, subprocess.TimeoutExpired):
+        return None
+
+
+def recommended_batch_size(memory_mb: int | None, profile: str) -> int:
+    if memory_mb is None:
+        batch_size = 4
+    elif memory_mb < 4096:
+        batch_size = 2
+    elif memory_mb < 7168:
+        batch_size = 4
+    elif memory_mb < 12288:
+        batch_size = 8
+    else:
+        batch_size = 16
+    return min(batch_size, 4) if profile == "precise" else batch_size
+
+
+def resolve_batch_size(configured: int, device: str, profile: str) -> int:
+    if device != "cuda":
+        return 1
+    if configured > 0:
+        return min(configured, 4) if profile == "precise" else configured
+    return recommended_batch_size(get_gpu_memory_mb(), profile)
+
+
+@lru_cache(maxsize=1)
 def get_model(model_size: str, device: str, compute_type: str) -> WhisperModel:
     cache_dir = settings.models_dir / model_size
     was_cached = cache_dir.exists() and any(cache_dir.iterdir())

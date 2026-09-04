@@ -4,6 +4,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -14,6 +15,13 @@ from backend.core import validators
 from backend.core.errors import DownloadError, JobCancelledError, PrivateContentError
 
 _PRIVATE_SIGNALS = ("login", "private", "rate-limit", "rate limit", "restricted")
+AudioQuality = Literal["compact", "balanced", "best"]
+_AUDIO_BITRATES = {"compact": "64", "balanced": "128", "best": "320"}
+_YT_DLP_FORMATS = {
+    "compact": "bestaudio[abr<=64]/bestaudio",
+    "balanced": "bestaudio[abr<=128]/bestaudio",
+    "best": "bestaudio/best",
+}
 
 
 @dataclass
@@ -35,11 +43,19 @@ def download_media(
     cancel_event: threading.Event,
     on_progress: Callable[[str, int | None], None] | None = None,
     cobalt_api_url: str | None = None,
+    audio_quality: AudioQuality = "balanced",
 ) -> DownloadResult:
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     if validators.is_tiktok_url(url) and cobalt_api_url:
-        return _download_with_cobalt(url, dest_dir, cobalt_api_url, cancel_event, on_progress)
+        return _download_with_cobalt(
+            url,
+            dest_dir,
+            cobalt_api_url,
+            cancel_event,
+            on_progress,
+            audio_quality,
+        )
 
     def progress_hook(d: dict) -> None:
         if cancel_event.is_set():
@@ -51,7 +67,7 @@ def download_media(
             on_progress(f"Descargando audio...{suffix}", percent)
 
     ydl_opts = {
-        "format": "bestaudio/best",
+        "format": _YT_DLP_FORMATS[audio_quality],
         "outtmpl": str(dest_dir / "%(id)s.%(ext)s"),
         "progress_hooks": [progress_hook],
         "concurrent_fragment_downloads": 4,
@@ -78,6 +94,7 @@ def download_media(
                 cobalt_api_url,
                 cancel_event,
                 on_progress,
+                audio_quality,
                 download_mode="auto",
             )
         message = str(exc)
@@ -109,6 +126,7 @@ def _download_with_cobalt(
     api_url: str,
     cancel_event: threading.Event,
     on_progress: Callable[[str, int | None], None] | None,
+    audio_quality: AudioQuality = "balanced",
     download_mode: str = "audio",
 ) -> DownloadResult:
     endpoint = f"{api_url.rstrip('/')}/"
@@ -120,7 +138,7 @@ def _download_with_cobalt(
                 "alwaysProxy": True,
                 "downloadMode": download_mode,
                 "audioFormat": "best",
-                "audioBitrate": "128",
+                "audioBitrate": _AUDIO_BITRATES[audio_quality],
                 "localProcessing": "disabled",
             }
         ).encode("utf-8"),
@@ -199,6 +217,7 @@ def _download_with_cobalt(
                 api_url,
                 cancel_event,
                 on_progress,
+                audio_quality,
                 download_mode="auto",
             )
         raise DownloadError("Cobalt devolvió un archivo vacío")

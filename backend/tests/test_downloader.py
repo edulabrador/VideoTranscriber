@@ -49,6 +49,7 @@ class CobaltDownloaderTests(unittest.TestCase):
                     "http://127.0.0.1:9000",
                     threading.Event(),
                     None,
+                    "compact",
                 )
 
             self.assertEqual(result.audio_path.read_bytes(), media)
@@ -56,6 +57,7 @@ class CobaltDownloaderTests(unittest.TestCase):
             request_payload = json.loads(mocked_urlopen.call_args_list[0].args[0].data)
             self.assertEqual(request_payload["downloadMode"], "audio")
             self.assertEqual(request_payload["audioFormat"], "best")
+            self.assertEqual(request_payload["audioBitrate"], "64")
 
 
 if __name__ == "__main__":

@@ -8,12 +8,15 @@ from pathlib import Path
 
 from backend.config import settings
 from backend.core import downloader, validators
-from backend.core.errors import TranscriberError
+from backend.core.downloader import AudioQuality
+from backend.core.errors import JobCancelledError, TranscriberError
 from backend.core.exporter import write_json, write_srt, write_txt
 from backend.core.history import HistoryItem, history_store
-from backend.core.transcriber import TranscriptionResult, transcribe_audio
+from backend.core.job_manager import JobStatus
+from backend.core.transcriber import TranscriptionProfile, TranscriptionResult, transcribe_audio
 
-StageCallback = Callable[[str, str, int | None], None]
+StageCallback = Callable[[JobStatus, str, int | None], None]
+_TRANSCRIPTION_LOCK = threading.Lock()
 
 
 @dataclass
@@ -30,7 +33,7 @@ class FileSource:
 Source = URLSource | FileSource
 
 
-def _noop_stage(_status: str, _message: str, _progress: int | None = None) -> None:
+def _noop_stage(_status: JobStatus, _message: str, _progress: int | None = None) -> None:
     pass
 
 
@@ -41,6 +44,8 @@ def run_pipeline(
     cancel_event: threading.Event | None = None,
     on_stage: StageCallback = _noop_stage,
     output_dir: Path | None = None,
+    profile: TranscriptionProfile = "balanced",
+    audio_quality: AudioQuality = "balanced",
 ) -> TranscriptionResult:
     cancel_event = cancel_event or threading.Event()
     output_dir = output_dir or (settings.output_dir / job_id)
@@ -64,6 +69,7 @@ def run_pipeline(
                 cancel_event,
                 on_progress=report_download,
                 cobalt_api_url=settings.cobalt_api_url,
+                audio_quality=audio_quality,
             )
             raw_audio_path = download_result.audio_path
             title = download_result.title
@@ -77,7 +83,10 @@ def run_pipeline(
             source_type = "file"
             transcription_start = 0
 
-        on_stage("transcribing", "Analizando el audio para calcular el progreso...", transcription_start)
+        on_stage("transcribing", "Esperando turno de procesamiento...", transcription_start)
+        while not _TRANSCRIPTION_LOCK.acquire(timeout=0.25):
+            if cancel_event.is_set():
+                raise JobCancelledError()
 
         def report_transcription(percent: int, eta_seconds: int | None) -> None:
             overall = transcription_start + round(percent * (98 - transcription_start) / 100)
@@ -93,22 +102,40 @@ def run_pipeline(
                 overall,
             )
 
-        result = transcribe_audio(
-            raw_audio_path,
-            settings.model_size,
-            settings.device,
-            settings.compute_type,
-            cancel_event,
-            settings.batch_size,
-            settings.beam_size,
-            report_transcription,
-        )
+        try:
+            if cancel_event.is_set():
+                raise JobCancelledError()
+            on_stage(
+                "transcribing",
+                "Analizando el audio para calcular el progreso...",
+                transcription_start,
+            )
+            result = transcribe_audio(
+                raw_audio_path,
+                settings.model_size,
+                settings.device,
+                settings.compute_type,
+                cancel_event,
+                settings.batch_size,
+                settings.beam_size,
+                profile,
+                report_transcription,
+            )
+        finally:
+            _TRANSCRIPTION_LOCK.release()
 
         on_stage("exporting", "Preparando los archivos...", 99)
         created_at = datetime.now(timezone.utc).isoformat()
         write_txt(result, output_dir / "transcript.txt")
         write_srt(result, output_dir / "subtitles.srt")
-        write_json(result, output_dir / "transcript.json", source=source_label, title=title, created_at=created_at)
+        write_json(
+            result,
+            output_dir / "transcript.json",
+            source=source_label,
+            title=title,
+            created_at=created_at,
+            audio_quality=audio_quality,
+        )
 
         history_store.add_entry(
             HistoryItem(

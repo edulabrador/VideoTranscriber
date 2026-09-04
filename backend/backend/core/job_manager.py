@@ -31,6 +31,7 @@ _STAGE_PROGRESS: dict[JobStatus, int] = {
     "cancelling": 99,
     "cancelled": 100,
 }
+_TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 
 
 @dataclass
@@ -44,14 +45,30 @@ class JobRecord:
     cancel_event: threading.Event = field(default_factory=threading.Event)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
+
 class JobManager:
-    def __init__(self) -> None:
+    def __init__(self, max_jobs: int = 20) -> None:
         self._jobs: dict[str, JobRecord] = {}
         self._lock = threading.Lock()
+        self._max_jobs = max_jobs
 
-    def create_job(self) -> JobRecord:
-        job = JobRecord(id=f"job_{uuid.uuid4().hex[:10]}")
+    def create_job(self, job_id: str | None = None) -> JobRecord:
         with self._lock:
+            if job_id and job_id in self._jobs:
+                return self._jobs[job_id]
+            while len(self._jobs) >= self._max_jobs:
+                finished_id = next(
+                    (
+                        existing_id
+                        for existing_id, existing in self._jobs.items()
+                        if existing.status in _TERMINAL_STATUSES
+                    ),
+                    None,
+                )
+                if finished_id is None:
+                    break
+                self._jobs.pop(finished_id)
+            job = JobRecord(id=job_id or f"job_{uuid.uuid4().hex[:10]}")
             self._jobs[job.id] = job
         return job
 
@@ -73,12 +90,17 @@ class JobManager:
             progress = _STAGE_PROGRESS[status] if progress_percent is None else progress_percent
             job.progress_percent = max(0, min(100, progress))
 
-    def set_result(self, job_id: str, result: TranscriptionResult) -> None:
+    def set_result(
+        self,
+        job_id: str,
+        result: TranscriptionResult,
+        message: str = "Transcripción completada.",
+    ) -> None:
         job = self.get_job(job_id)
         if job is not None:
             job.result = result
             job.status = "completed"
-            job.stage_message = "Transcripción completada."
+            job.stage_message = message
             job.progress_percent = 100
 
     def set_error(self, job_id: str, code: str, message: str, status: JobStatus = "failed") -> None:

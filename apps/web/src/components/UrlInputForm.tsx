@@ -3,9 +3,15 @@ import { useState } from "react";
 import { postJson } from "../api/client";
 import { useJobContext } from "../context/JobContext";
 import { isInstagramUrl } from "../lib/validateInstagramUrl";
-import type { JobResponse } from "../api/types";
+import type { AudioQuality, JobResponse, TranscriptionProfile } from "../api/types";
 
-export function UrlInputForm() {
+export function UrlInputForm({
+  profile,
+  audioQuality,
+}: {
+  profile: TranscriptionProfile;
+  audioQuality: AudioQuality;
+}) {
   const { state, dispatch } = useJobContext();
   const [url, setUrl] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -33,7 +39,11 @@ export function UrlInputForm() {
     setValidationError(null);
     setSubmitting(true);
     try {
-      const job = await postJson<JobResponse>("/api/jobs", { url });
+      const job = await postJson<JobResponse>("/api/jobs", {
+        url,
+        profile,
+        audio_quality: audioQuality,
+      });
       dispatch({ type: "START_JOB", jobId: job.id });
     } catch (err) {
       setValidationError(err instanceof Error ? err.message : "No se pudo iniciar la transcripción");

@@ -1,24 +1,35 @@
 import asyncio
 import shutil
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from backend.api.schemas import (
     CreateJobFromUrlRequest,
     HealthResponse,
     HistoryItemSchema,
+    JobErrorPayload,
     JobResponse,
     JobStatusResponse,
     TranscriptResultSchema,
+    TranscriptSegmentSchema,
+    TranscriptWordSchema,
 )
 from backend.config import settings
 from backend.core.audio import check_ffmpeg_available
+from backend.core.downloader import AudioQuality
 from backend.core.errors import TranscriberError, UnsupportedURLError
 from backend.core.history import history_store
-from backend.core.job_manager import job_manager
-from backend.core.model_manager import resolve_compute_type, select_device_and_compute_type
-from backend.core.pipeline import FileSource, URLSource, run_pipeline
+from backend.core.job_manager import JobStatus, job_manager
+from backend.core.model_manager import (
+    get_gpu_memory_mb,
+    resolve_batch_size,
+    resolve_compute_type,
+    select_device_and_compute_type,
+)
+from backend.core.pipeline import FileSource, Source, URLSource, run_pipeline
+from backend.core.transcriber import TranscriptionProfile
 from backend.core.validators import validate_instagram_url
 
 router = APIRouter(prefix="/api")
@@ -30,19 +41,31 @@ _ALLOWED_EXPORT_FORMATS = {
 }
 
 
-def _run_job(job_id: str, source) -> None:
+def _run_job(
+    job_id: str,
+    source: Source,
+    profile: TranscriptionProfile,
+    audio_quality: AudioQuality = "balanced",
+) -> None:
     job = job_manager.get_job(job_id)
     if job is None:
         return
 
-    def on_stage(status: str, message: str, progress: int | None = None) -> None:
+    def on_stage(status: JobStatus, message: str, progress: int | None = None) -> None:
         job_manager.update_status(job_id, status, message, progress)
 
     try:
-        result = run_pipeline(job_id, source, cancel_event=job.cancel_event, on_stage=on_stage)
+        result = run_pipeline(
+            job_id,
+            source,
+            cancel_event=job.cancel_event,
+            on_stage=on_stage,
+            profile=profile,
+            audio_quality=audio_quality,
+        )
         job_manager.set_result(job_id, result)
     except TranscriberError as exc:
-        status = "cancelled" if exc.code == "cancelled" else "failed"
+        status: JobStatus = "cancelled" if exc.code == "cancelled" else "failed"
         job_manager.set_error(job_id, exc.code, exc.message, status=status)
 
 
@@ -55,13 +78,31 @@ async def create_job_from_url(payload: CreateJobFromUrlRequest) -> JobResponse:
             status_code=400, detail={"code": exc.code, "message": exc.message}
         ) from exc
 
+    cached = history_store.find_cached(payload.url, payload.profile, payload.audio_quality)
+    if cached:
+        cached_id, result = cached
+        job = job_manager.create_job(cached_id)
+        job_manager.set_result(cached_id, result, "Resultado reutilizado del historial.")
+        return JobResponse(id=job.id, status="completed", cached=True)
+
     job = job_manager.create_job()
-    asyncio.create_task(asyncio.to_thread(_run_job, job.id, URLSource(url=payload.url)))
+    asyncio.create_task(
+        asyncio.to_thread(
+            _run_job,
+            job.id,
+            URLSource(url=payload.url),
+            payload.profile,
+            payload.audio_quality,
+        )
+    )
     return JobResponse(id=job.id, status=job.status)
 
 
 @router.post("/jobs/upload", response_model=JobResponse, status_code=201)
-async def create_job_from_upload(file: UploadFile) -> JobResponse:
+async def create_job_from_upload(
+    file: UploadFile,
+    profile: Annotated[TranscriptionProfile, Form()] = "balanced",
+) -> JobResponse:
     if not file.content_type or not (
         file.content_type.startswith("audio/") or file.content_type.startswith("video/")
     ):
@@ -75,7 +116,7 @@ async def create_job_from_upload(file: UploadFile) -> JobResponse:
         shutil.copyfileobj(file.file, f)
 
     source = FileSource(path=dest_path, original_name=file.filename or "archivo subido")
-    asyncio.create_task(asyncio.to_thread(_run_job, job.id, source))
+    asyncio.create_task(asyncio.to_thread(_run_job, job.id, source, profile, "best"))
     return JobResponse(id=job.id, status=job.status)
 
 
@@ -89,7 +130,7 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
         status=job.status,
         stage_message=job.stage_message,
         progress_percent=job.progress_percent,
-        error=job.error,
+        error=JobErrorPayload(**job.error) if job.error else None,
     )
 
 
@@ -114,12 +155,15 @@ async def get_job_result(job_id: str) -> TranscriptResultSchema:
     result = job.result
     return TranscriptResultSchema(
         segments=[
-            {
-                "start": seg.start,
-                "end": seg.end,
-                "text": seg.text,
-                "words": [{"start": w.start, "end": w.end, "word": w.word} for w in seg.words],
-            }
+            TranscriptSegmentSchema(
+                start=seg.start,
+                end=seg.end,
+                text=seg.text,
+                words=[
+                    TranscriptWordSchema(start=w.start, end=w.end, word=w.word)
+                    for w in seg.words
+                ],
+            )
             for seg in result.segments
         ],
         language=result.language,
@@ -129,6 +173,9 @@ async def get_job_result(job_id: str) -> TranscriptResultSchema:
         text=result.text,
         model_size=result.model_size,
         device=result.device,
+        compute_type=result.compute_type,
+        batch_size=result.batch_size,
+        profile=result.profile,
     )
 
 
@@ -162,4 +209,6 @@ async def health() -> HealthResponse:
         ffmpeg=check_ffmpeg_available(),
         device=device,
         compute_type=compute_type,
+        gpu_memory_mb=get_gpu_memory_mb() if device == "cuda" else None,
+        batch_size=resolve_batch_size(settings.batch_size, device, "balanced"),
     )

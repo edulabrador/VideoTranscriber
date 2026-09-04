@@ -7,6 +7,7 @@ import { TranscriptView } from "./components/TranscriptView";
 import { UrlInputForm } from "./components/UrlInputForm";
 import { JobProvider, useJobContext } from "./context/JobContext";
 import { useJobPolling } from "./hooks/useJobPolling";
+import type { AudioQuality, TranscriptionProfile } from "./api/types";
 
 type InputMode = "url" | "file";
 
@@ -45,6 +46,14 @@ function DarkModeToggle() {
 function TranscriberPanel() {
   const { state } = useJobContext();
   const [mode, setMode] = useState<InputMode>("url");
+  const [profile, setProfile] = useState<TranscriptionProfile>(() => {
+    const saved = localStorage.getItem("transcription-profile");
+    return saved === "fast" || saved === "precise" ? saved : "balanced";
+  });
+  const [audioQuality, setAudioQuality] = useState<AudioQuality>(() => {
+    const saved = localStorage.getItem("audio-quality");
+    return saved === "compact" || saved === "best" ? saved : "balanced";
+  });
   useJobPolling();
 
   return (
@@ -67,7 +76,51 @@ function TranscriberPanel() {
           ))}
         </div>
 
-        <div className="mt-5">{mode === "url" ? <UrlInputForm /> : <FileDropZone />}</div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="text-xs font-bold text-stone-600 dark:text-stone-300">
+            Perfil de transcripción
+            <select
+              value={profile}
+              onChange={(event) => {
+                const value = event.target.value as TranscriptionProfile;
+                setProfile(value);
+                localStorage.setItem("transcription-profile", value);
+              }}
+              className="mt-1.5 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm font-medium text-stone-800 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
+            >
+              <option value="fast">Rápido. Menor espera</option>
+              <option value="balanced">Equilibrado. Recomendado</option>
+              <option value="precise">Preciso. Más lento</option>
+            </select>
+          </label>
+
+          {mode === "url" && (
+            <label className="text-xs font-bold text-stone-600 dark:text-stone-300">
+              Calidad de descarga
+              <select
+                value={audioQuality}
+                onChange={(event) => {
+                  const value = event.target.value as AudioQuality;
+                  setAudioQuality(value);
+                  localStorage.setItem("audio-quality", value);
+                }}
+                className="mt-1.5 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm font-medium text-stone-800 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
+              >
+                <option value="compact">Compacta. Descarga rápida</option>
+                <option value="balanced">Equilibrada. Recomendada</option>
+                <option value="best">Máxima. Archivo mayor</option>
+              </select>
+            </label>
+          )}
+        </div>
+
+        <div className="mt-5">
+          {mode === "url" ? (
+            <UrlInputForm profile={profile} audioQuality={audioQuality} />
+          ) : (
+            <FileDropZone profile={profile} />
+          )}
+        </div>
       </section>
 
       <ProgressIndicator />

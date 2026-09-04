@@ -23,6 +23,56 @@ class HistoryStoreTests(unittest.TestCase):
 
             self.assertEqual([entry.get("text") for entry in result], ["texto 0", "texto 1", None])
 
+    def test_finds_compatible_cached_url_ignoring_tracking_query(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output_dir = root / "output"
+            transcript_dir = output_dir / "job_cached"
+            transcript_dir.mkdir(parents=True)
+            history_path = root / "history.json"
+            history_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "job_cached",
+                            "source": "https://x.com/user/status/123?s=20",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (transcript_dir / "transcript.json").write_text(
+                json.dumps(
+                    {
+                        "language": "es",
+                        "language_probability": 0.99,
+                        "duration": 10,
+                        "text": "texto guardado",
+                        "model_size": "large-v3-turbo",
+                        "device": "cuda",
+                        "compute_type": "int8_float16",
+                        "batch_size": 4,
+                        "profile": "balanced",
+                        "audio_quality": "best",
+                        "segments": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            store = HistoryStore(history_path, 50, output_dir)
+            cached = store.find_cached(
+                "https://x.com/user/status/123?utm_source=test", "balanced", "compact"
+            )
+
+            self.assertIsNotNone(cached)
+            assert cached is not None
+            self.assertEqual(cached[0], "job_cached")
+            self.assertEqual(cached[1].text, "texto guardado")
+            self.assertIsNone(
+                store.find_cached("https://x.com/user/status/123", "precise", "compact")
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
