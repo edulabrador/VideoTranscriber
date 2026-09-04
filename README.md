@@ -2,304 +2,178 @@
 
 # VideoTranscriber
 
-**Turn Instagram, TikTok, and X videos into clean, timestamped transcripts.**
+**Convierte vídeos de Instagram, TikTok y Twitter (X) en texto desde tu ordenador.**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933)](https://nodejs.org/)
+[![Licencia MIT](https://img.shields.io/badge/licencia-MIT-yellow.svg)](LICENSE)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
+[![React](https://img.shields.io/badge/React-TypeScript-149eca.svg)](https://react.dev/)
 
 </div>
 
----
+VideoTranscriber descarga únicamente el audio necesario y lo transcribe mediante
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper). El reconocimiento se
+ejecuta localmente. No necesita claves de API ni una suscripción.
 
-Paste an Instagram, TikTok, or X URL (or drop a local video/audio file), and get back a
-searchable, timestamped transcript you can copy or export — from a clean web
-app or straight from your terminal. No API keys, no subscriptions, no data
-leaving your machine. Speech recognition runs locally using
-[faster-whisper](https://github.com/SYSTRAN/faster-whisper). Instagram downloading is
-handled by [yt-dlp](https://github.com/yt-dlp/yt-dlp), with a separate local
-[Cobalt](https://github.com/imputnet/cobalt) service for TikTok and fallback downloads, and audio processing by
-[FFmpeg](https://ffmpeg.org/). This project just wires proven tools together
-into something pleasant to use.
+## Funciones
 
-## Table of contents
+- Enlaces de Instagram, TikTok, X y Twitter.
+- Archivos locales de audio y vídeo.
+- Aceleración mediante GPU NVIDIA CUDA, con retorno a CPU cuando corresponda.
+- Progreso basado en bytes descargados y segundos de audio procesados.
+- Estimación del tiempo restante y cancelación de trabajos.
+- Exportación a TXT, SRT y JSON.
+- Historial local. Las dos últimas entradas permiten desplegar el texto completo.
+- Interfaz en español, modo oscuro y diseño adaptable.
+- Limpieza automática de los archivos temporales.
 
-- [Features](#features)
-- [Quickstart](#quickstart)
-- [Using the web app](#using-the-web-app)
-- [Using the CLI](#using-the-cli)
-- [Configuration](#configuration)
-- [Private / login-gated content](#private--login-gated-content)
-- [Hardware notes](#hardware-notes)
-- [Troubleshooting](#troubleshooting)
-- [Project structure](#project-structure)
-- [Development](#development)
-- [Contributing](#contributing)
-- [Credits](#credits)
-- [License](#license)
+## Iniciar en Windows sin Codex
 
-## Features
+Codex no es necesario para usar el programa.
 
-- **Paste a URL or drag & drop** a local audio/video file — no download step needed for local files
-- **Live progress** with a cancel button for in-flight jobs
-- **Word-level timestamps**, toggleable in the transcript view
-- **Word count, duration, and detected language** shown automatically
-- **Copy to clipboard** with one click (and automatically from the CLI)
-- **Export** as TXT, SRT (subtitles), or JSON
-- **Recent history**, shared between the web app and the CLI
-- **Works entirely from the terminal** if you don't want a browser open
-- **Dark mode**, responsive layout, no account or sign-in required
-- **Runs locally** — media is fetched only from its original platform and
-  speech recognition stays on your machine
+### En este ordenador
 
-## Quickstart
+Haz doble clic en:
 
-### 1. Install prerequisites
+**`Iniciar VideoTranscriber.bat`**
 
-You'll need four things. If you already have them, skip ahead.
+El iniciador comprueba los requisitos, instala lo que falte dentro del proyecto,
+arranca los tres servicios y abre automáticamente:
 
-| Tool | Why | Install |
-|---|---|---|
-| **Python 3.11+** | Runs the backend | [python.org](https://www.python.org/downloads/) (macOS/Linux usually have it already) |
-| **Node.js 18+** | Runs the frontend build tooling | [nodejs.org](https://nodejs.org/) |
-| **pnpm** | Package manager for the frontend | `corepack enable pnpm` (ships with modern Node) |
-| **uv** | Fast Python package/environment manager | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
-| **ffmpeg** | Audio extraction/conversion | macOS: `brew install ffmpeg` · Ubuntu/Debian: `sudo apt install ffmpeg` · [more options](https://ffmpeg.org/download.html) |
+[http://localhost:5173](http://localhost:5173)
 
-> **macOS note:** if `brew install ffmpeg` seems to hang or starts
-> compiling LLVM/Clang from source, your Command Line Tools are probably
-> mismatched with Homebrew's prebuilt bottles. Don't wait it out — see
-> [Troubleshooting](#troubleshooting) for a 30-second fix.
+La ventana de terminal debe permanecer abierta. Para detener la aplicación, ciérrala
+o pulsa `Ctrl+C`.
 
-### 2. Clone and set up
+### En otro ordenador
 
-```bash
+Instala una sola vez:
+
+- [Git](https://git-scm.com/download/win)
+- [Node.js LTS](https://nodejs.org/)
+- pnpm mediante `corepack enable pnpm`
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- El controlador NVIDIA actualizado si se va a utilizar una GPU NVIDIA.
+
+Después descarga el proyecto:
+
+```powershell
 git clone https://github.com/edulabrador/VideoTranscriber.git
 cd VideoTranscriber
-./scripts/setup.sh
 ```
 
-`setup.sh` checks that everything above is installed, installs all Python
-and Node dependencies, creates your local `.env` files, and creates the
-`models/`, `output/`, and `temp/` folders. It does **not** download the
-speech recognition model yet — that happens automatically the first time you
-transcribe something (see [Hardware notes](#hardware-notes) for sizes).
+Por último, haz doble clic en `Iniciar VideoTranscriber.bat`.
 
-### 3. Run it
+La primera preparación descarga las dependencias. La primera transcripción descarga
+también el modelo de voz. Puede ocupar varios gigabytes y las siguientes ejecuciones
+reutilizan todo lo descargado.
 
-```bash
+## Inicio manual
+
+Si prefieres utilizar la terminal:
+
+```powershell
 pnpm dev
 ```
 
-This starts Cobalt (`http://localhost:9000`), the backend API
-(`http://localhost:8000`), and the web app (`http://localhost:5173`) together.
-Open the web app and paste an Instagram, TikTok, or X video URL.
+Servicios locales:
 
-That's it — first transcription will take a bit longer while the model
-downloads (once, ever, after that it's cached and reused).
-
-## Using the web app
-
-1. Paste an Instagram, TikTok, or X video URL into the input box (or click **Upload
-   file** to drag & drop a local audio/video file instead)
-2. Click **Transcribe**
-3. Watch the progress bar — you can cancel at any point
-4. Once it's done, read the transcript, toggle timestamps on/off, and:
-   - **Copy transcript** — copies the plain text to your clipboard
-   - **Download TXT / SRT / JSON** — saves the transcript in that format
-5. Past transcriptions show up under **Recent** — from both the web app and
-   the CLI
-
-## Using the CLI
-
-No browser needed. From the `VideoTranscriber` directory:
-
-```bash
-uv run --project backend transcriber "https://www.instagram.com/reel/XXXXXXX/"
-
-# or transcribe a local file instead of downloading
-uv run --project backend transcriber ./some-video.mp4
-```
-
-Output:
-
-```
-Downloading...
-Extracting audio...
-Transcribing...
-Done.
-
-Language: en (100% confidence)
-Duration: 12.4s   Words: 38
-Saved to: output/transcript.txt, subtitles.srt, transcript.json
-```
-
-The transcript is also copied to your clipboard automatically. Useful flags:
-
-| Flag | Description |
+| Servicio | Dirección |
 |---|---|
-| `--model <name>` | Force a specific whisper model (e.g. `--model small` for a faster, lower-quality run) |
-| `--cookies <path>` | Path to a `cookies.txt` for private/login-gated content |
-| `--output-dir <path>` | Where to write `transcript.txt` / `subtitles.srt` / `transcript.json` (default: `output/`) |
-| `--no-clipboard` | Skip copying the transcript to your clipboard |
+| Aplicación web | `http://localhost:5173` |
+| API | `http://localhost:8000` |
+| Descargador Cobalt | `http://localhost:9000` |
 
-Tip: if you'd rather not type `uv run --project backend` every time,
-`uv sync` also installs the `transcriber` command into `backend/.venv` — you
-can activate that virtualenv (`source backend/.venv/bin/activate`) and just
-run `transcriber "<url>"` directly.
+También existe una interfaz de terminal:
 
-## Configuration
+```powershell
+uv run --project backend transcriber "https://www.instagram.com/reel/XXXXX/"
+```
 
-Copy `.env.example` to `.env` (setup.sh does this for you) and adjust as
-needed:
+## ¿Se puede ejecutar directamente desde GitHub?
 
-| Variable | Default | Description |
+No puede ejecutarse la aplicación completa dentro de GitHub Pages. Pages solo sirve
+archivos estáticos y no admite el backend Python, la descarga de vídeos ni el uso de
+la GPU local.
+
+GitHub Actions sí puede ejecutar pruebas automáticas, pero sus máquinas son temporales
+y no están pensadas para mantener esta aplicación disponible como servicio web.
+
+Para ofrecerla públicamente habría que alojar el backend en un servidor externo. Eso
+añadiría coste, límites, gestión de privacidad y probablemente una GPU de pago. Para
+uso personal, la ejecución local es más privada, barata y rápida.
+
+## Configuración
+
+La configuración local está en `.env`. Este archivo nunca se sube a GitHub.
+
+| Variable | Valor habitual | Función |
 |---|---|---|
-| `COOKIES_FILE` | unset | Path to a `cookies.txt` for private content — see below |
-| `COBALT_API_URL` | `http://127.0.0.1:9000` | Local Cobalt service used for TikTok and fallback downloads |
-| `MODEL_SIZE` | `auto` | `auto` picks the best model for your hardware, or set a specific [faster-whisper model name](https://github.com/SYSTRAN/faster-whisper#model-conversion) (e.g. `tiny`, `small`, `medium`, `large-v3`) |
-| `DEVICE` | `auto` | `auto` / `cpu` / `cuda` |
-| `COMPUTE_TYPE` | `auto` | CTranslate2 compute type override (e.g. `int8`, `float16`) |
+| `COOKIES_FILE` | vacío | Archivo `cookies.txt` para publicaciones que exigen sesión |
+| `COBALT_API_URL` | `http://127.0.0.1:9000` | Descargador local para TikTok y rutas alternativas |
+| `MODEL_SIZE` | `auto` | Modelo de faster-whisper |
+| `DEVICE` | `auto` | Selección entre `cuda` y `cpu` |
+| `COMPUTE_TYPE` | `auto` | Precisión de cálculo |
+| `BATCH_SIZE` | `4` | Lotes de GPU. Un valor mayor consume más VRAM |
+| `BEAM_SIZE` | `1` | Prioriza velocidad. `5` puede mejorar precisión y tarda más |
 
-## Private / login-gated content
+La configuración optimizada de este ordenador está guardada únicamente en su `.env`
+local. El repositorio mantiene valores automáticos compatibles con otros equipos.
 
-Some Instagram content requires a logged-in session to download. If you hit
-a "requires login" error:
+## Privacidad y archivos
 
-1. Install a browser extension like [Get cookies.txt
-   LOCALLY](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)
-2. Log into Instagram in that browser, then export cookies for
-   `instagram.com` to a file (Netscape format)
-3. Set `COOKIES_FILE=/path/to/cookies.txt` in your `.env`, or pass
-   `--cookies /path/to/cookies.txt` to the CLI
+La transcripción se realiza en el ordenador. Los vídeos solo se solicitan a la
+plataforma original o al descargador Cobalt que se ejecuta localmente.
 
-Public content works with no configuration at all.
+Estos directorios no se suben a GitHub:
 
-## Hardware notes
+- `models/`: modelos de reconocimiento.
+- `output/`: textos y subtítulos generados.
+- `temp/`: audio temporal.
+- `backend/data/`: historial.
+- `.env`: configuración privada.
 
-Speech recognition runs on
-[CTranslate2](https://github.com/OpenNMT/CTranslate2), which supports NVIDIA
-CUDA and CPU — but **not** Apple Silicon GPU acceleration (there's no
-Metal/MPS backend). What this means in practice:
+Los archivos temporales se eliminan al terminar o cancelar un trabajo.
 
-- **NVIDIA GPU machines:** uses `large-v3` with `float16` — fast and highest
-  quality.
-- **Apple Silicon and other CPU-only machines:** uses `large-v3-turbo` with
-  `int8` quantization automatically — a much better speed/quality tradeoff
-  on CPU than the full `large-v3` model. Still, transcription can run slower
-  than real-time on older or lower-power CPUs.
-- **Cancel latency on slow CPUs:** cancellation is checked between whisper
-  segments. On a slow CPU, a short clip may decode as a single segment
-  before anything is cancellable, so `Cancel` can take a while to actually
-  stop a job rather than being instant. If this bothers you, set
-  `MODEL_SIZE=small` or `MODEL_SIZE=base` in `.env` for snappier (if less
-  accurate) transcription and cancellation.
+## Contenido que requiere iniciar sesión
 
-You can always override the automatic choice — see
-[Configuration](#configuration).
+Algunas publicaciones pueden exigir una sesión válida. Exporta las cookies de tu
+navegador en formato Netscape y configura su ruta:
 
-## Troubleshooting
-
-**`brew install ffmpeg` hangs / starts compiling LLVM from source**
-Some Homebrew setups don't have a prebuilt ("bottled") ffmpeg for your exact
-macOS/toolchain combination, so it falls back to compiling everything from
-source — including LLVM, which can take an hour or more. Skip it and grab a
-prebuilt static binary instead:
-
-```bash
-curl -LsSf https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip -o /tmp/ffmpeg.zip
-curl -LsSf https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip -o /tmp/ffprobe.zip
-cd /tmp && unzip -o ffmpeg.zip && unzip -o ffprobe.zip
-mv ffmpeg ffprobe /usr/local/bin/
-xattr -d com.apple.quarantine /usr/local/bin/ffmpeg /usr/local/bin/ffprobe 2>/dev/null
-ffmpeg -version   # should print a version, not "command not found"
+```env
+COOKIES_FILE=C:\ruta\a\cookies.txt
 ```
 
-**`onnxruntime` fails to install on Intel Mac** (`can't be installed because
-it doesn't have a source distribution or wheel for the current platform`)
-Newer `onnxruntime` releases dropped macOS x86_64 (Intel) wheels. This repo
-already pins `onnxruntime<1.24` in `backend/pyproject.toml` to avoid it — if
-you still hit this, make sure you're on the latest `main` and re-run
-`uv sync --project backend`.
+No compartas ni subas ese archivo.
 
-**Web app shows "Not Found" and nothing happens when you click Transcribe**
-This almost always means `apps/web/.env` is missing, so the frontend can't
-find the backend. `./scripts/setup.sh` creates it automatically; if you set
-things up manually, copy `apps/web/.env.example` to `apps/web/.env` and
-restart `pnpm dev`.
+## Estructura
 
-**"This content requires a logged-in session"**
-See [Private / login-gated content](#private--login-gated-content) above.
-
-**First transcription takes a long time**
-The whisper model (600 MB – 3 GB depending on hardware) downloads once on
-first use and is cached under `models/` forever after — this is expected
-and only happens the first time.
-
-**`GET /api/health` is your friend**
-With the backend running, `curl localhost:8000/api/health` reports whether
-ffmpeg is detected and which device/compute type will be used — a fast way
-to sanity-check your setup.
-
-## Project structure
-
-```
-apps/web/                  React + TypeScript + Vite + Tailwind frontend
-backend/backend/
-  config.py                 Settings (env-driven)
-  cli.py                     `transcriber` command
-  api/                        FastAPI app, routes, schemas
-  core/
-    downloader.py             yt-dlp wrapper
-    audio.py                   ffmpeg wrapper
-    model_manager.py           hardware detection + model caching
-    transcriber.py             faster-whisper wrapper
-    exporter.py                 txt/srt/json writers
-    history.py                  recent-history store
-    job_manager.py              in-memory job registry + cancellation
-    pipeline.py                  shared orchestration used by API and CLI
-models/  output/  temp/       gitignored runtime data (created on first run)
+```text
+apps/web/          Interfaz React, TypeScript y Tailwind
+backend/backend/   API FastAPI y motor de transcripción
+backend/tests/     Pruebas del backend
+scripts/           Preparación para macOS y Linux
+services/cobalt/   Dependencia descargada localmente. No se copia al repositorio
+models/            Modelos locales
+output/            Transcripciones guardadas
+temp/              Archivos temporales
 ```
 
-## Development
+## Desarrollo y comprobaciones
 
-See the [Development guide](docs/DEV_GUIDE.md) for the job status state
-machine, running services independently, linting/type-checking, and how to
-add a new export format.
+```powershell
+pnpm --filter web build
+uv run --project backend --extra dev ruff check backend/backend backend/tests
+uv run --project backend python -m unittest discover -s backend/tests -v
+```
 
-For running this in a more permanent/unattended setting, see the
-[Production guide](docs/PRODUCTION_GUIDE.md).
+La documentación técnica adicional está en [docs/DEV_GUIDE.md](docs/DEV_GUIDE.md).
 
-## Contributing
+## Tecnologías y licencias
 
-Issues and pull requests are welcome. A few guidelines to keep this project
-pleasant to maintain:
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper), reconocimiento de voz.
+- [CTranslate2](https://github.com/OpenNMT/CTranslate2), ejecución optimizada en CPU y CUDA.
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp), descarga de medios.
+- [Cobalt](https://github.com/imputnet/cobalt), descarga local de TikTok y rutas alternativas. Se instala como proyecto separado y conserva su licencia AGPL-3.0.
+- [PyAV](https://github.com/PyAV-Org/PyAV), lectura de audio y vídeo.
 
-- **Reuse, don't reinvent.** This project exists to wire together yt-dlp,
-  faster-whisper, and ffmpeg cleanly — prefer using what those libraries
-  already give you over writing custom logic.
-- **Keep the CLI and API in sync.** Both call the same
-  `backend/backend/core/pipeline.py` — don't duplicate pipeline logic in
-  either entrypoint.
-- **No unnecessary dependencies.** This app is meant to stay lightweight and
-  easy to audit. If you're adding a dependency, make sure it earns its
-  place.
-- Run `pnpm --filter web build` and `uv run --project backend ruff check
-  backend` before opening a PR.
-
-## Credits
-
-This project is a thin, opinionated integration layer over:
-
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) — media download
-- [Cobalt](https://github.com/imputnet/cobalt) — local TikTok and X download service, licensed separately under AGPL-3.0
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — speech
-  recognition, including bundled Silero VAD and word-level timestamps
-- [FFmpeg](https://ffmpeg.org/) — audio extraction and conversion
-
-All the hard work of speech recognition and media downloading is done by
-these projects — this repo just gives them a pleasant UI and a clean CLI.
-
-## License
-
-[MIT](LICENSE)
+El código propio de VideoTranscriber utiliza la licencia [MIT](LICENSE).
