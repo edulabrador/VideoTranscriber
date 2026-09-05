@@ -52,7 +52,7 @@ def _copy_to_clipboard(text: str) -> bool:
 @app.command()
 def main(
     source: str = typer.Argument(
-        ..., help="Enlace de Instagram, TikTok o Twitter (X), o ruta de un archivo local"
+        ..., help="Enlace de YouTube, Instagram, TikTok o Twitter (X), o un archivo local"
     ),
     model: str = typer.Option(None, "--model", help="Cambiar el tamaño del modelo Whisper"),
     cookies: Path = typer.Option(

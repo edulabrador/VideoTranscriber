@@ -2,7 +2,7 @@ import json
 import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from backend.config import settings
 from backend.core.exporter import read_json
@@ -15,6 +15,19 @@ def _source_key(source: str) -> str:
     parsed = urlsplit(source.strip())
     if parsed.scheme not in {"http", "https"}:
         return source.strip()
+    host = (parsed.hostname or "").lower()
+    if host in {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"}:
+        video_id = parse_qs(parsed.query).get("v", [""])[0]
+        if video_id:
+            return f"youtube:{video_id}"
+    if host in {"youtu.be", "www.youtu.be"}:
+        video_id = parsed.path.strip("/").split("/", 1)[0]
+        if video_id:
+            return f"youtube:{video_id}"
+    if host in {"youtube.com", "www.youtube.com", "m.youtube.com"}:
+        parts = parsed.path.strip("/").split("/")
+        if len(parts) == 2 and parts[0] in {"shorts", "live", "embed"}:
+            return f"youtube:{parts[1]}"
     return f"{parsed.netloc.lower()}{parsed.path.rstrip('/')}"
 
 

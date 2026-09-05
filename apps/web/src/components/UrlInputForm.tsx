@@ -33,7 +33,7 @@ export function UrlInputForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isInstagramUrl(url)) {
-      setValidationError("Introduce un enlace válido de Instagram, TikTok o Twitter (X)");
+      setValidationError("Introduce un enlace válido de YouTube, Instagram, TikTok o Twitter (X)");
       return;
     }
     setValidationError(null);
@@ -74,7 +74,7 @@ export function UrlInputForm({
               setUrl(e.target.value);
               if (validationError) setValidationError(null);
             }}
-            placeholder="https://instagram.com/reel/..."
+            placeholder="https://youtube.com/watch?v=..."
             aria-invalid={Boolean(validationError)}
             className="w-full rounded-2xl border border-stone-200 bg-stone-50 py-3.5 pl-11 pr-4 text-sm shadow-inner transition placeholder:text-stone-400 focus:border-brand-500 dark:border-stone-700 dark:bg-stone-950/60 dark:text-stone-100"
           />

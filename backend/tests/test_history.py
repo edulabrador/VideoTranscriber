@@ -3,10 +3,20 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from backend.core.history import HistoryStore
+from backend.core.history import HistoryStore, _source_key
 
 
 class HistoryStoreTests(unittest.TestCase):
+    def test_youtube_cache_key_uses_the_video_id(self) -> None:
+        self.assertEqual(
+            _source_key("https://www.youtube.com/watch?v=BaW_jenozKc&t=10"),
+            _source_key("https://youtu.be/BaW_jenozKc"),
+        )
+        self.assertNotEqual(
+            _source_key("https://www.youtube.com/watch?v=BaW_jenozKc"),
+            _source_key("https://www.youtube.com/watch?v=OtherVideo"),
+        )
+
     def test_only_two_latest_entries_include_transcript_text(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

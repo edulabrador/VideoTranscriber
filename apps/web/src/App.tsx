@@ -157,10 +157,10 @@ export default function App() {
               Tus vídeos, convertidos en <span className="bg-gradient-to-r from-brand-600 to-cyan-500 bg-clip-text text-transparent">texto claro.</span>
             </h2>
             <p className="mt-4 text-base leading-7 text-stone-600 dark:text-stone-300 sm:text-lg">
-              Convierte vídeos de Instagram, TikTok y Twitter (X) en texto desde tu ordenador.
+              Convierte vídeos de YouTube, Instagram, TikTok y Twitter (X) en texto desde tu ordenador.
             </p>
             <div className="mt-5 flex flex-wrap gap-2" aria-label="Plataformas compatibles">
-              {["Instagram", "TikTok", "Twitter (X)"].map((platform) => (
+              {["YouTube", "Instagram", "TikTok", "Twitter (X)"].map((platform) => (
                 <span key={platform} className="rounded-full border border-stone-200 bg-white/70 px-3 py-1 text-xs font-semibold text-stone-600 shadow-sm backdrop-blur dark:border-stone-700 dark:bg-stone-900/60 dark:text-stone-300">
                   {platform}
                 </span>

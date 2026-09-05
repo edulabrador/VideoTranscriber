@@ -2,7 +2,7 @@
 
 # VideoTranscriber
 
-**Convierte vídeos de Instagram, TikTok y Twitter (X) en texto desde tu ordenador.**
+**Convierte vídeos de YouTube, Instagram, TikTok y Twitter (X) en texto desde tu ordenador.**
 
 [![Licencia MIT](https://img.shields.io/badge/licencia-MIT-yellow.svg)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
@@ -16,7 +16,7 @@ ejecuta localmente. No necesita claves de API ni una suscripción.
 
 ## Funciones
 
-- Enlaces de Instagram, TikTok, X y Twitter.
+- Enlaces de YouTube, Instagram, TikTok, X y Twitter.
 - Archivos locales de audio y vídeo.
 - Aceleración mediante GPU NVIDIA CUDA, con retorno a CPU cuando corresponda.
 - Perfiles Rápido, Equilibrado y Preciso para elegir entre velocidad y exactitud.

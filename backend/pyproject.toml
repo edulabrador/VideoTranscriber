@@ -1,7 +1,7 @@
 [project]
 name = "video-transcriber"
 version = "0.1.0"
-description = "Local-first Instagram, TikTok, and X video transcriber"
+description = "Local-first YouTube, Instagram, TikTok, and X video transcriber"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",
