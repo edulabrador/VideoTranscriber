@@ -3,6 +3,9 @@ setlocal
 cd /d "%~dp0"
 title VideoTranscriber
 
+if exist "%~dp0runtime\node\bin\node.exe" set "PATH=%~dp0runtime\bin\fallback;%~dp0runtime\node\bin;%PATH%"
+if exist "%USERPROFILE%\.local\bin\uv.exe" set "PATH=%USERPROFILE%\.local\bin;%PATH%"
+
 echo.
 echo ========================================
 echo       VideoTranscriber
@@ -34,6 +37,12 @@ if not exist "services\cobalt\api\package.json" (
   if errorlevel 1 goto startup_error
 )
 
+if not exist "services\cobalt\api\.env" (
+  >"services\cobalt\api\.env" echo API_URL=http://localhost:9187/
+  >>"services\cobalt\api\.env" echo API_PORT=9187
+  >>"services\cobalt\api\.env" echo API_LISTEN_ADDRESS=127.0.0.1
+)
+
 if not exist "backend\.venv\Scripts\python.exe" (
   echo Instalando el motor de transcripcion...
   uv sync --project backend
@@ -59,7 +68,7 @@ if /I "%~1"=="--check" (
 
 echo Iniciando. Esta ventana debe permanecer abierta.
 echo Para detener la aplicacion, pulsa Ctrl+C o cierra esta ventana.
-start "" powershell.exe -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 5; Start-Process 'http://localhost:5173/'"
+start "" powershell.exe -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 5; Start-Process 'http://localhost:5187/'"
 call %PNPM% dev
 exit /b %errorlevel%
 

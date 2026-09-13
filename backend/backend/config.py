@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     history_file: Path = REPO_ROOT / "backend" / "data" / "history.json"
 
     cookies_file: Path | None = None
-    cobalt_api_url: str | None = "http://127.0.0.1:9000"
+    cobalt_api_url: str | None = "http://127.0.0.1:9187"
 
     @field_validator("cookies_file", "cobalt_api_url", mode="before")
     @classmethod
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     batch_size: int = 0
     beam_size: int = 1
 
-    cors_origins: list[str] = ["http://localhost:5173"]
+    cors_origins: list[str] = ["http://localhost:5187"]
     max_history_entries: int = 50
 
     def ensure_dirs(self) -> None:

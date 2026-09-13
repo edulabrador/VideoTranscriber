@@ -44,7 +44,7 @@ Haz doble clic en:
 El iniciador comprueba los requisitos, instala lo que falte dentro del proyecto,
 arranca los tres servicios y abre automáticamente:
 
-[http://localhost:5173](http://localhost:5173)
+[http://localhost:5187](http://localhost:5187)
 
 La ventana de terminal debe permanecer abierta. Para detener la aplicación, ciérrala
 o pulsa `Ctrl+C`.
@@ -86,9 +86,9 @@ Servicios locales:
 
 | Servicio | Dirección |
 |---|---|
-| Aplicación web | `http://localhost:5173` |
-| API | `http://localhost:8000` |
-| Descargador Cobalt | `http://localhost:9000` |
+| Aplicación web | `http://localhost:5187` |
+| API | `http://localhost:8187` |
+| Descargador Cobalt | `http://localhost:9187` |
 
 También existe una interfaz de terminal:
 
@@ -116,7 +116,7 @@ La configuración local está en `.env`. Este archivo nunca se sube a GitHub.
 | Variable | Valor habitual | Función |
 |---|---|---|
 | `COOKIES_FILE` | vacío | Archivo `cookies.txt` para publicaciones que exigen sesión |
-| `COBALT_API_URL` | `http://127.0.0.1:9000` | Descargador local para TikTok y rutas alternativas |
+| `COBALT_API_URL` | `http://127.0.0.1:9187` | Descargador local para TikTok y rutas alternativas |
 | `MODEL_SIZE` | `auto` | Modelo de faster-whisper |
 | `DEVICE` | `auto` | Selección entre `cuda` y `cpu` |
 | `COMPUTE_TYPE` | `auto` | Precisión de cálculo |
