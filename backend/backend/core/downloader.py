@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import threading
 from collections.abc import Callable
@@ -15,8 +16,13 @@ from backend.core import validators
 from backend.core.errors import DownloadError, JobCancelledError, PrivateContentError
 
 _PRIVATE_SIGNALS = ("login", "private", "rate-limit", "rate limit", "restricted")
+_LOGGER = logging.getLogger(__name__)
+_SAFE_FORMAT_ID = re.compile(r"[A-Za-z0-9_.-]+\Z")
+_SAFE_LANGUAGE = re.compile(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]+)*\Z")
+_NON_ORIGINAL_NOTE = re.compile(r"\b(?:dubbed|dub|descriptive|description|audiodescription)\b", re.I)
 AudioQuality = Literal["compact", "balanced", "best"]
 _AUDIO_BITRATES = {"compact": "64", "balanced": "128", "best": "320"}
+_AUDIO_LIMITS = {"compact": 64, "balanced": 128}
 _YT_DLP_FORMATS = {
     "compact": "bestaudio[abr<=64]/bestaudio",
     "balanced": "bestaudio[abr<=128]/bestaudio",
@@ -34,6 +40,63 @@ class DownloadResult:
 
 class _CancelledSentinel(Exception):
     """Raised inside yt-dlp's progress hook to unwind out of its download loop."""
+
+
+def _language_base(value: object) -> str | None:
+    if not isinstance(value, str) or not _SAFE_LANGUAGE.fullmatch(value):
+        return None
+    return value.split("-", 1)[0].lower()
+
+
+def _safe_format_id(value: object) -> str | None:
+    return value if isinstance(value, str) and _SAFE_FORMAT_ID.fullmatch(value) else None
+
+
+def _pick_original_audio_format(
+    info: dict, audio_quality: AudioQuality = "balanced"
+) -> tuple[str | None, str]:
+    """Choose a marked original audio format, or explain why the normal selector is safer."""
+    formats = info.get("formats")
+    if not isinstance(formats, list):
+        return None, "sin lista de formatos"
+    audio = [
+        fmt for fmt in formats
+        if isinstance(fmt, dict) and fmt.get("vcodec") == "none"
+        and fmt.get("acodec") not in (None, "none")
+    ]
+    if len(audio) < 2:
+        return None, "sin varias pistas de audio"
+    marked = [
+        fmt for fmt in audio
+        if re.search(r"\boriginal\b", str(fmt.get("format_note") or ""), re.I)
+    ]
+    if not marked:
+        return None, "ninguna pista marcada como original"
+    if any(_NON_ORIGINAL_NOTE.search(str(fmt.get("format_note") or "")) for fmt in marked):
+        return None, "marca original contradictoria con descripción o doblaje"
+    languages = {_language_base(fmt.get("language")) for fmt in marked}
+    if None in languages or len(languages) != 1:
+        return None, "idioma original ausente o contradictorio"
+    original_language = next(iter(languages))
+    video_language = _language_base(info.get("language"))
+    if video_language and video_language != original_language:
+        return None, "idioma del vídeo contradice la pista original"
+    if any(_safe_format_id(fmt.get("format_id")) is None for fmt in marked):
+        return None, "identificador de formato ausente o no válido"
+
+    if any(sum(fmt.get("format_id") == item.get("format_id") for item in audio) != 1 for fmt in marked):
+        return None, "identificador de formato ambiguo"
+
+    limit = _AUDIO_LIMITS.get(audio_quality)
+    within_limit = (
+        [
+            fmt for fmt in marked
+            if isinstance(fmt.get("abr"), (int, float)) and fmt["abr"] <= limit
+        ]
+        if limit is not None else []
+    )
+    selected = (within_limit or marked)[-1]  # yt-dlp orders processed formats worst to best.
+    return selected["format_id"], f"pista original identificada ({original_language})"
 
 
 def download_media(
@@ -82,7 +145,32 @@ def download_media(
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+            if validators.is_youtube_url(url):
+                info = ydl.extract_info(url, download=False)
+                if cancel_event.is_set():
+                    raise _CancelledSentinel()
+                format_id, reason = _pick_original_audio_format(info, audio_quality)
+                if format_id:
+                    ydl.params["format"] = format_id
+                    selected = next(
+                        fmt for fmt in info["formats"]
+                        if isinstance(fmt, dict) and fmt.get("format_id") == format_id
+                    )
+                    _LOGGER.info(
+                        "Audio original: language=%s format_id=%s reason=%s profile=%s",
+                        _language_base(selected.get("language")), format_id, reason, audio_quality,
+                    )
+                info = ydl.process_ie_result(info, download=True)
+                if not format_id:
+                    _LOGGER.warning(
+                        "No se pudo identificar el audio original, se usa el comportamiento "
+                        "por defecto: language=%s format_id=%s reason=%s profile=%s",
+                        _language_base(info.get("language")) or "unknown",
+                        _safe_format_id(info.get("format_id")) or "unknown",
+                        reason, audio_quality,
+                    )
+            else:
+                info = ydl.extract_info(url, download=True)
             audio_path = Path(ydl.prepare_filename(info))
     except _CancelledSentinel as exc:
         raise JobCancelledError() from exc
