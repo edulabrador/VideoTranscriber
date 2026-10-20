@@ -31,11 +31,16 @@ if errorlevel 1 goto broken_pnpm
 if not exist ".env" copy /Y ".env.example" ".env" >nul
 if not exist "apps\web\.env" copy /Y "apps\web\.env.example" "apps\web\.env" >nul
 
+set /p COBALT_REF=<"scripts\cobalt-ref.txt"
 if not exist "services\cobalt\api\package.json" (
   echo Descargando el componente de TikTok...
-  git clone --depth 1 https://github.com/imputnet/cobalt.git "services\cobalt"
+  git clone --filter=blob:none --no-checkout https://github.com/imputnet/cobalt.git "services\cobalt"
+  if errorlevel 1 goto startup_error
+  git -C services\cobalt checkout --detach %COBALT_REF%
   if errorlevel 1 goto startup_error
 )
+for /f %%C in ('git -C services\cobalt rev-parse HEAD') do set "COBALT_INSTALLED=%%C"
+if not "%COBALT_INSTALLED%"=="%COBALT_REF%" goto cobalt_version_error
 
 if not exist "services\cobalt\api\.env" (
   >"services\cobalt\api\.env" echo API_URL=http://localhost:9187/
@@ -45,7 +50,7 @@ if not exist "services\cobalt\api\.env" (
 
 if not exist "backend\.venv\Scripts\python.exe" (
   echo Instalando el motor de transcripcion...
-  uv sync --project backend
+  uv sync --project backend --locked
   if errorlevel 1 goto startup_error
 )
 
@@ -66,11 +71,24 @@ if /I "%~1"=="--check" (
   exit /b 0
 )
 
+powershell.exe -NoProfile -Command "if (Get-NetTCPConnection -State Listen -LocalPort 5187,8187,9187 -ErrorAction SilentlyContinue) { exit 1 }"
+if errorlevel 1 goto ports_in_use
+
 echo Iniciando. Esta ventana debe permanecer abierta.
 echo Para detener la aplicacion, pulsa Ctrl+C o cierra esta ventana.
-start "" powershell.exe -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 5; Start-Process 'http://localhost:5187/'"
+start "" powershell.exe -NoProfile -WindowStyle Hidden -Command "for ($i = 0; $i -lt 30; $i++) { try { $web = Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:5187/' -TimeoutSec 2; $api = Invoke-RestMethod 'http://127.0.0.1:8187/api/health' -TimeoutSec 2; if ($web.StatusCode -eq 200 -and $web.Content -match '<title>VideoTranscriber</title>' -and $api.status -eq 'ok' -and $api.app -eq 'VideoTranscriber') { Start-Process 'http://127.0.0.1:5187/'; break } } catch {}; Start-Sleep -Seconds 1 }"
 call %PNPM% dev
 exit /b %errorlevel%
+
+:ports_in_use
+echo ERROR: uno de los puertos 5187, 8187 o 9187 ya esta ocupado.
+echo Cierra la instancia anterior o la aplicacion que utiliza ese puerto.
+goto requirements_error
+
+:cobalt_version_error
+echo ERROR: la version instalada de Cobalt no coincide con scripts\cobalt-ref.txt.
+echo Comprueba los cambios locales de services\cobalt antes de actualizar ese componente.
+goto requirements_error
 
 :missing_git
 echo ERROR: falta Git. Instalalo desde https://git-scm.com/download/win

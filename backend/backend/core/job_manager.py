@@ -8,6 +8,7 @@ from backend.core.transcriber import TranscriptionResult
 
 JobStatus = Literal[
     "queued",
+    "loading_model",
     "downloading",
     "extracting_audio",
     "transcribing",
@@ -22,6 +23,7 @@ JobStatus = Literal[
 # plumbing true byte/frame-level progress from yt-dlp/ffmpeg/whisper to the UI.
 _STAGE_PROGRESS: dict[JobStatus, int] = {
     "queued": 0,
+    "loading_model": 20,
     "downloading": 5,
     "extracting_audio": 35,
     "transcribing": 45,
@@ -75,6 +77,10 @@ class JobManager:
     def get_job(self, job_id: str) -> JobRecord | None:
         with self._lock:
             return self._jobs.get(job_id)
+
+    def remove_job(self, job_id: str) -> None:
+        with self._lock:
+            self._jobs.pop(job_id, None)
 
     def update_status(
         self,

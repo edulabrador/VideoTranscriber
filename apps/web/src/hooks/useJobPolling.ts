@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 
-import { getJson } from "../api/client";
-import type { JobStatusResponse, TranscriptResult } from "../api/types";
+import { ApiError, getJson } from "../api/client";
 import { useJobContext } from "../context/JobContext";
+import { loadJobUpdate } from "../lib/jobPolling";
 
 const POLL_INTERVAL_MS = 1500;
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
@@ -19,12 +19,17 @@ export function useJobPolling() {
     if (!jobId) return;
 
     let cancelled = false;
+    let failures = 0;
+    const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
 
     const poll = async () => {
       try {
-        const job = await getJson<JobStatusResponse>(`/api/jobs/${jobId}`);
+        const { job, result } = await loadJobUpdate(
+          jobId, <T,>(path: string) => getJson<T>(path, controller.signal),
+        );
         if (cancelled) return;
+        failures = 0;
         dispatch({
           type: "UPDATE_STATUS",
           status: job.status,
@@ -33,22 +38,36 @@ export function useJobPolling() {
           error: job.error,
         });
 
-        if (job.status === "completed") {
-          const result = await getJson<TranscriptResult>(`/api/jobs/${jobId}/result`);
-          if (!cancelled) dispatch({ type: "SET_RESULT", result });
-        }
+        if (result) dispatch({ type: "SET_RESULT", result });
 
         if (!cancelled && !TERMINAL_STATUSES.has(job.status)) {
           timer = setTimeout(poll, POLL_INTERVAL_MS);
         }
-      } catch {
-        if (!cancelled) timer = setTimeout(poll, POLL_INTERVAL_MS);
+      } catch (error) {
+        if (cancelled) return;
+        if (error instanceof ApiError && error.status && error.status < 500) {
+          const message = error.status === 404
+            ? "El trabajo ya no está disponible. El servidor pudo reiniciarse. Puedes volver a transcribirlo."
+            : error.message;
+          dispatch({
+            type: "UPDATE_STATUS", status: "failed", stageMessage: message,
+            progressPercent: 0, error: { code: "job_unavailable", message },
+          });
+          return;
+        }
+        failures += 1;
+        dispatch({
+          type: "CONNECTION_ERROR",
+          message: "Se perdió la conexión con el servidor local. Reintentando automáticamente... Comprueba que VideoTranscriber siga abierto.",
+        });
+        timer = setTimeout(poll, Math.min(15_000, POLL_INTERVAL_MS * 2 ** Math.min(failures, 4)));
       }
     };
 
     poll();
     return () => {
       cancelled = true;
+      controller.abort();
       clearTimeout(timer);
     };
   }, [jobId, dispatch]);

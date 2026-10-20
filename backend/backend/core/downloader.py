@@ -36,6 +36,9 @@ class DownloadResult:
     title: str
     uploader: str | None
     source_duration: float | None
+    audio_language: str | None = None
+    audio_format_id: str | None = None
+    audio_selection: Literal["original", "default"] = "default"
 
 
 class _CancelledSentinel(Exception):
@@ -120,6 +123,11 @@ def download_media(
             audio_quality,
         )
 
+    audio_language = None
+    audio_format_id = None
+    audio_selection: Literal["original", "default"] = "default"
+    audio_status = ""
+
     def progress_hook(d: dict) -> None:
         if cancel_event.is_set():
             raise _CancelledSentinel()
@@ -127,7 +135,7 @@ def download_media(
             total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
             percent = round(d.get("downloaded_bytes", 0) * 100 / total) if total else None
             suffix = f" {percent} %" if percent is not None else ""
-            on_progress(f"Descargando audio...{suffix}", percent)
+            on_progress(f"Descargando audio...{suffix}{audio_status}", percent)
 
     ydl_opts = {
         "format": _YT_DLP_FORMATS[audio_quality],
@@ -156,10 +164,17 @@ def download_media(
                         fmt for fmt in info["formats"]
                         if isinstance(fmt, dict) and fmt.get("format_id") == format_id
                     )
+                    audio_language = _language_base(selected.get("language"))
+                    audio_format_id = format_id
+                    audio_selection = "original"
                     _LOGGER.info(
                         "Audio original: language=%s format_id=%s reason=%s profile=%s",
                         _language_base(selected.get("language")), format_id, reason, audio_quality,
                     )
+                audio_status = (
+                    f" · audio: {audio_language} (original)"
+                    if format_id else " · audio: pista por defecto, no identificada"
+                )
                 info = ydl.process_ie_result(info, download=True)
                 if not format_id:
                     _LOGGER.warning(
@@ -205,6 +220,9 @@ def download_media(
         title=info.get("title") or info.get("id"),
         uploader=info.get("uploader"),
         source_duration=info.get("duration"),
+        audio_language=audio_language,
+        audio_format_id=audio_format_id,
+        audio_selection=audio_selection,
     )
 
 

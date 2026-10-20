@@ -49,16 +49,22 @@ fi
 
 echo ""
 echo "-- Installing backend dependencies (uv sync) --"
-uv sync --project backend
+uv sync --project backend --locked
 
 echo ""
 echo "-- Installing frontend dependencies (pnpm install) --"
-pnpm install
+pnpm install --frozen-lockfile
 
+COBALT_REF="$(tr -d '\r\n' < scripts/cobalt-ref.txt)"
 if [[ ! -f services/cobalt/api/package.json ]]; then
   echo ""
   echo "-- Downloading Cobalt --"
-  git clone --depth 1 https://github.com/imputnet/cobalt.git services/cobalt
+  git clone --filter=blob:none --no-checkout https://github.com/imputnet/cobalt.git services/cobalt
+  git -C services/cobalt checkout --detach "$COBALT_REF"
+fi
+if [[ "$(git -C services/cobalt rev-parse HEAD)" != "$COBALT_REF" ]]; then
+  echo "Cobalt does not match scripts/cobalt-ref.txt. Review its local changes before updating."
+  exit 1
 fi
 
 echo ""

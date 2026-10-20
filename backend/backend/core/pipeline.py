@@ -8,6 +8,7 @@ from pathlib import Path
 
 from backend.config import settings
 from backend.core import downloader, validators
+from backend.core.audio import normalize_to_wav16k_mono
 from backend.core.downloader import AudioQuality
 from backend.core.errors import JobCancelledError, TranscriberError
 from backend.core.exporter import write_json, write_srt, write_txt
@@ -56,7 +57,7 @@ def run_pipeline(
         if isinstance(source, URLSource):
             validators.validate_instagram_url(source.url)
 
-            on_stage("downloading", "Preparando la descarga...", 1)
+            on_stage("downloading", "Consultando el vídeo y las pistas de audio...", 1)
 
             def report_download(message: str, percent: int | None) -> None:
                 overall = 1 if percent is None else 1 + round(percent * 0.19)
@@ -76,14 +77,21 @@ def run_pipeline(
             source_label = source.url
             source_type = "url"
             transcription_start = 20
+            audio_label = (
+                f"Audio: {download_result.audio_language} (original)"
+                if download_result.audio_selection == "original"
+                else "Audio: pista por defecto, no identificada"
+            )
         else:
-            raw_audio_path = source.path
+            on_stage("extracting_audio", "Preparando el audio del archivo subido...", 0)
+            raw_audio_path = normalize_to_wav16k_mono(source.path, job_temp_dir / "audio.wav")
             title = source.original_name
             source_label = source.original_name
             source_type = "file"
             transcription_start = 0
+            audio_label = "Audio: archivo subido"
 
-        on_stage("transcribing", "Esperando turno de procesamiento...", transcription_start)
+        on_stage("queued", f"En cola. Esperando turno de procesamiento. {audio_label}", transcription_start)
         while not _TRANSCRIPTION_LOCK.acquire(timeout=0.25):
             if cancel_event.is_set():
                 raise JobCancelledError()
@@ -98,18 +106,13 @@ def run_pipeline(
                 remaining = f"Quedan aproximadamente {ceil(eta_seconds / 60)} minutos."
             on_stage(
                 "transcribing",
-                f"Transcribiendo audio: {percent} %. {remaining}",
+                f"Transcribiendo audio: {percent} %. {remaining} {audio_label}",
                 overall,
             )
 
         try:
             if cancel_event.is_set():
                 raise JobCancelledError()
-            on_stage(
-                "transcribing",
-                "Analizando el audio para calcular el progreso...",
-                transcription_start,
-            )
             result = transcribe_audio(
                 raw_audio_path,
                 settings.model_size,
@@ -120,7 +123,14 @@ def run_pipeline(
                 settings.beam_size,
                 profile,
                 report_transcription,
+                lambda status, message: on_stage(
+                    status, f"{message} {audio_label}", transcription_start
+                ),
             )
+            if isinstance(source, URLSource):
+                result.audio_language = download_result.audio_language
+                result.audio_format_id = download_result.audio_format_id
+                result.audio_selection = download_result.audio_selection
         finally:
             _TRANSCRIPTION_LOCK.release()
 

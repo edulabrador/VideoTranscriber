@@ -28,6 +28,9 @@ ejecuta localmente. No necesita claves de API ni una suscripción.
 - Estimación del tiempo restante y cancelación de trabajos.
 - Exportación a TXT, SRT y JSON.
 - Historial local. Las dos últimas entradas permiten desplegar el texto completo.
+- Búsqueda en todos los textos del historial y apertura de resultados antiguos.
+- Recuperación del último trabajo al recargar la página y avisos de desconexión.
+- Opción para volver a transcribir sin reutilizar el resultado guardado.
 - Interfaz en español, modo oscuro y diseño adaptable.
 - Limpieza automática de los archivos temporales.
 
@@ -44,7 +47,7 @@ Haz doble clic en:
 El iniciador comprueba los requisitos, instala lo que falte dentro del proyecto,
 arranca los tres servicios y abre automáticamente:
 
-[http://localhost:5187](http://localhost:5187)
+[http://127.0.0.1:5187](http://127.0.0.1:5187)
 
 La ventana de terminal debe permanecer abierta. Para detener la aplicación, ciérrala
 o pulsa `Ctrl+C`.
@@ -86,8 +89,8 @@ Servicios locales:
 
 | Servicio | Dirección |
 |---|---|
-| Aplicación web | `http://localhost:5187` |
-| API | `http://localhost:8187` |
+| Aplicación web | `http://127.0.0.1:5187` |
+| API | `http://127.0.0.1:8187` |
 | Descargador Cobalt | `http://localhost:9187` |
 
 También existe una interfaz de terminal:
@@ -141,6 +144,33 @@ La aplicación no modifica frecuencias, voltajes, ventiladores ni límites de po
 CUDA utiliza los mecanismos normales del controlador NVIDIA. Aun así, cualquier
 tarea intensiva puede elevar temporalmente el uso y la temperatura del equipo.
 
+### Fiabilidad y recuperación
+
+El progreso distingue consulta del vídeo, descarga del audio, preparación del archivo,
+espera en cola, carga o descarga del modelo y transcripción. En YouTube se muestra
+el idioma y formato de la pista original cuando se identifica con confianza; en caso
+contrario se avisa de que se usa la pista por defecto.
+
+La casilla **Volver a transcribir** ignora la caché. Los resultados anteriores a una
+actualización del procesamiento, o creados con otro modelo o búsqueda, no se reutilizan
+automáticamente. Siguen disponibles para abrir y exportar desde el historial.
+
+Al recargar el navegador se recupera el último trabajo. Si se pierde la conexión,
+la interfaz avisa y reintenta. Los resultados terminados se recuperan del disco
+tras reiniciar el servidor. Los trabajos interrumpidos por el reinicio no se reanudan:
+la interfaz indica que hay que volver a enviarlos.
+
+En el historial puedes buscar por título, enlace o texto, abrir cualquier resultado,
+copiarlo y exportarlo. Al eliminar una entrada puedes elegir si se borran también
+sus archivos. La eliminación de archivos requiere confirmación.
+
+Las subidas admiten hasta **512 MiB** por defecto, configurable con `MAX_UPLOAD_BYTES`
+en `.env`. El servidor genera el nombre del archivo y elimina las subidas incompletas.
+
+Los instaladores fijan Cobalt al commit de `scripts/cobalt-ref.txt`. Si una instalación
+existente usa otro commit, se detienen para que puedas revisar los cambios antes de
+actualizarla. No actualizan ese componente automáticamente.
+
 ## Privacidad y archivos
 
 La transcripción se realiza en el ordenador. Los vídeos solo se solicitan a la
@@ -185,8 +215,14 @@ temp/              Archivos temporales
 ```powershell
 pnpm --filter web build
 uv run --project backend --extra dev ruff check backend/backend backend/tests
-uv run --project backend python -m unittest discover -s backend/tests -v
+uv run --project backend --extra dev pytest backend/tests -q
+uv run --project backend --extra dev mypy --config-file backend/pyproject.toml backend/backend
+pnpm --dir apps/web test
+pnpm --dir apps/web lint
 ```
+
+GitHub Actions ejecuta estas comprobaciones y la compilación web en cada push y PR.
+Las pruebas de red son opcionales y están desactivadas por defecto.
 
 La documentación técnica adicional está en [docs/DEV_GUIDE.md](docs/DEV_GUIDE.md).
 

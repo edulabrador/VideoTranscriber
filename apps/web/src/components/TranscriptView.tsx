@@ -42,6 +42,9 @@ export function TranscriptView({ jobId, result }: { jobId: string; result: Trans
         <Badge>Duración: {formatTimestamp(result.duration)}</Badge>
         <Badge>{result.word_count} palabras</Badge>
         <Badge>Perfil: {PROFILE_LABELS[result.profile]}</Badge>
+        {result.audio_selection && <Badge>{result.audio_selection === "original"
+          ? `Audio: ${result.audio_language ?? "?"} (original)${result.audio_format_id ? ` · ${result.audio_format_id}` : ""}`
+          : "Audio: pista por defecto, no identificada"}</Badge>}
         <Badge>Modelo: {result.model_size} · {result.device} · lote {result.batch_size}</Badge>
       </div>
 

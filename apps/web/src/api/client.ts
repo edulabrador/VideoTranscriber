@@ -1,11 +1,13 @@
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8187";
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8187";
 
 export class ApiError extends Error {
   code: string;
+  status?: number;
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, status?: number) {
     super(message);
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -20,21 +22,23 @@ async function handleResponse<T>(res: Response): Promise<T> {
     } catch {
       // response body wasn't JSON — fall back to statusText
     }
-    throw new ApiError(code, message);
+    throw new ApiError(code, message, res.status);
   }
   return (await res.json()) as T;
 }
 
 async function fetchApi(path: string, init?: RequestInit): Promise<Response> {
   try {
-    return await fetch(`${BASE_URL}${path}`, init);
+    const timeout = AbortSignal.timeout(init?.body instanceof FormData ? 300_000 : 15_000);
+    const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+    return await fetch(`${BASE_URL}${path}`, { ...init, signal });
   } catch {
     throw new ApiError("network_error", "No se pudo conectar con el servidor local.");
   }
 }
 
-export async function getJson<T>(path: string): Promise<T> {
-  const res = await fetchApi(path);
+export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetchApi(path, { signal });
   return handleResponse<T>(res);
 }
 

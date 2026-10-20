@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -28,8 +28,9 @@ class Settings(BaseSettings):
     batch_size: int = 0
     beam_size: int = 1
 
-    cors_origins: list[str] = ["http://localhost:5187"]
+    cors_origins: list[str] = ["http://127.0.0.1:5187"]
     max_history_entries: int = 50
+    max_upload_bytes: int = Field(default=512 * 1024 * 1024, gt=0)
 
     def ensure_dirs(self) -> None:
         for path in (self.models_dir, self.output_dir, self.temp_dir, self.history_file.parent):

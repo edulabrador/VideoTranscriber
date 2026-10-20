@@ -13,6 +13,8 @@ from backend.core.validators import is_instagram_url
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
 _STAGE_LABELS = {
+    "queued": "Esperando turno...",
+    "loading_model": "Descargando o cargando el modelo...",
     "downloading": "Descargando vídeo...",
     "extracting_audio": "Preparando el audio...",
     "transcribing": "Transcribiendo audio...",

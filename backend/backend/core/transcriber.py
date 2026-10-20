@@ -10,6 +10,7 @@ from faster_whisper import BatchedInferencePipeline
 from backend.core.errors import JobCancelledError, TranscriptionError
 from backend.core.model_manager import (
     get_model,
+    is_model_cached,
     resolve_batch_size,
     resolve_compute_type,
     resolve_model_size,
@@ -47,6 +48,10 @@ class TranscriptionResult:
     compute_type: str
     batch_size: int
     profile: TranscriptionProfile
+    beam_size: int = 1
+    audio_language: str | None = None
+    audio_format_id: str | None = None
+    audio_selection: Literal["original", "default"] | None = None
 
     @property
     def word_count(self) -> int:
@@ -75,6 +80,7 @@ def transcribe_audio(
     beam_size: int = 1,
     profile: TranscriptionProfile = "balanced",
     on_progress: ProgressCallback | None = None,
+    on_status: Callable[[Literal["loading_model", "transcribing"], str], None] | None = None,
 ) -> TranscriptionResult:
     device, _ = select_device_and_compute_type(device_preference)
     model_size_preference, beam_size = resolve_profile_settings(
@@ -88,11 +94,26 @@ def transcribe_audio(
     batch_size = resolve_batch_size(batch_size, device, profile)
 
     try:
+        if cancel_event.is_set():
+            raise JobCancelledError()
+        if on_status:
+            message = (
+                f"Cargando el modelo {model_size}..."
+                if is_model_cached(model_size)
+                else f"Descargando y cargando el modelo {model_size}. La primera vez puede tardar varios minutos."
+            )
+            on_status("loading_model", message)
         model = get_model(model_size, device, compute_type)
+    except JobCancelledError:
+        raise
     except Exception as exc:  # noqa: BLE001 - surface as a typed transcription error
         raise TranscriptionError(f"No se pudo cargar el modelo de transcripción: {exc}") from exc
 
     try:
+        if cancel_event.is_set():
+            raise JobCancelledError()
+        if on_status:
+            on_status("transcribing", "Modelo listo. Analizando el audio...")
         transcriber = BatchedInferencePipeline(model=model) if device == "cuda" and batch_size > 1 else model
         options = {
             "vad_filter": True,
@@ -126,6 +147,8 @@ def transcribe_audio(
                     eta = round(elapsed * (100 - progress) / progress) if progress >= 2 else None
                     on_progress(progress, eta)
                     last_progress = progress
+        if cancel_event.is_set():
+            raise JobCancelledError()
         if on_progress:
             on_progress(100, 0)
     except JobCancelledError:
@@ -144,4 +167,5 @@ def transcribe_audio(
         compute_type=compute_type,
         batch_size=batch_size,
         profile=profile,
+        beam_size=beam_size,
     )

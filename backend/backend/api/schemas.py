@@ -9,6 +9,7 @@ class CreateJobFromUrlRequest(BaseModel):
     url: str
     profile: Literal["fast", "balanced", "precise"] = "balanced"
     audio_quality: Literal["compact", "balanced", "best"] = "balanced"
+    force: bool = False
 
 
 class JobResponse(BaseModel):
@@ -55,6 +56,9 @@ class TranscriptResultSchema(BaseModel):
     compute_type: str
     batch_size: int
     profile: Literal["fast", "balanced", "precise"]
+    audio_language: str | None = None
+    audio_format_id: str | None = None
+    audio_selection: Literal["original", "default"] | None = None
 
 
 class HistoryItemSchema(BaseModel):
@@ -70,6 +74,7 @@ class HistoryItemSchema(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    app: Literal["VideoTranscriber"] = "VideoTranscriber"
     status: str
     ffmpeg: bool
     device: str

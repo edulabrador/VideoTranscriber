@@ -10,10 +10,15 @@ export function ProgressIndicator() {
   const isTerminal = TERMINAL_STATUSES.has(state.status);
   const isError = state.status === "failed";
   const isTranscribing = state.status === "transcribing";
-  const isIndeterminate = isTranscribing && !state.stageMessage.includes("%");
+  const isIndeterminate = !isTerminal && (
+    state.status === "loading_model" || state.status === "queued"
+    || (state.status === "downloading" && state.progressPercent <= 1)
+    || (isTranscribing && !state.stageMessage.includes("%"))
+  );
 
   return (
     <div className={`flex flex-col gap-3 rounded-2xl border bg-white/85 p-5 shadow-soft backdrop-blur dark:bg-stone-900/85 ${isError ? "border-red-200 dark:border-red-900" : "border-stone-200/80 dark:border-stone-800"}`}>
+      {state.connectionMessage && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">{state.connectionMessage}</p>}
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
           <span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${isError ? "bg-red-500" : "animate-pulse bg-brand-500"}`} />
@@ -25,7 +30,7 @@ export function ProgressIndicator() {
               <p className="mt-1 text-xs text-stone-400">
                 {isTranscribing
                   ? isIndeterminate
-                    ? "Calculando un progreso real..."
+                    ? "El progreso aparecerá cuando termine la preparación del audio."
                     : "Progreso basado en los segundos de audio ya procesados."
                   : `${Math.round(state.progressPercent)} % completado`}
               </p>
@@ -39,6 +44,8 @@ export function ProgressIndicator() {
         role="progressbar"
         aria-label="Progreso de la transcripción"
         aria-valuenow={isIndeterminate ? undefined : Math.round(state.progressPercent)}
+        aria-valuemin={0}
+        aria-valuemax={100}
       >
         <div
           className={`h-full rounded-full ${

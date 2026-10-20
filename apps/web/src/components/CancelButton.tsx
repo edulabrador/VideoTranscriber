@@ -4,7 +4,7 @@ import { postJson } from "../api/client";
 import { useJobContext } from "../context/JobContext";
 
 export function CancelButton() {
-  const { state } = useJobContext();
+  const { state, dispatch } = useJobContext();
   const [cancelling, setCancelling] = useState(false);
 
   const handleCancel = async () => {
@@ -12,8 +12,9 @@ export function CancelButton() {
     setCancelling(true);
     try {
       await postJson(`/api/jobs/${state.jobId}/cancel`, {});
-    } catch {
-      // job may have already reached a terminal state — polling will reflect it
+    } catch (error) {
+      setCancelling(false);
+      dispatch({ type: "CONNECTION_ERROR", message: error instanceof Error ? error.message : "No se pudo cancelar. Puedes intentarlo de nuevo." });
     }
   };
 

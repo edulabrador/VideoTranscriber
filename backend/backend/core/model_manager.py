@@ -15,6 +15,7 @@ if os.name == "nt":
 
 import ctranslate2  # noqa: E402
 from faster_whisper import WhisperModel  # noqa: E402
+from faster_whisper.utils import download_model  # noqa: E402
 
 from backend.config import settings  # noqa: E402
 
@@ -109,8 +110,7 @@ def resolve_batch_size(configured: int, device: str, profile: str) -> int:
 
 @lru_cache(maxsize=1)
 def get_model(model_size: str, device: str, compute_type: str) -> WhisperModel:
-    cache_dir = settings.models_dir / model_size
-    was_cached = cache_dir.exists() and any(cache_dir.iterdir())
+    was_cached = is_model_cached(model_size)
     logger.info(
         "Loading whisper model=%s device=%s compute_type=%s (%s)",
         model_size,
@@ -124,6 +124,16 @@ def get_model(model_size: str, device: str, compute_type: str) -> WhisperModel:
         compute_type=compute_type,
         download_root=str(settings.models_dir),
     )
+
+
+def is_model_cached(model_size: str) -> bool:
+    if (Path(model_size) / "model.bin").is_file():
+        return True
+    try:
+        path = download_model(model_size, cache_dir=str(settings.models_dir), local_files_only=True)
+        return (Path(path) / "model.bin").is_file()
+    except Exception:  # Cache lookup is informational and must never prevent transcription.
+        return False
 
 
 def load_model_for_settings() -> tuple[WhisperModel, str, str, str]:

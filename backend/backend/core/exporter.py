@@ -4,6 +4,8 @@ from pathlib import Path
 
 from backend.core.transcriber import TranscriptSegment, TranscriptWord, TranscriptionResult
 
+PROCESSING_VERSION = 2
+
 
 def _srt_timestamp(seconds: float) -> str:
     millis = round(seconds * 1000)
@@ -54,6 +56,11 @@ def write_json(
         "compute_type": result.compute_type,
         "batch_size": result.batch_size,
         "profile": result.profile,
+        "processing_version": PROCESSING_VERSION,
+        "beam_size": result.beam_size,
+        "audio_language": result.audio_language,
+        "audio_format_id": result.audio_format_id,
+        "audio_selection": result.audio_selection,
         "audio_quality": audio_quality,
         "text": result.text,
         "segments": [asdict(seg) for seg in result.segments],
@@ -86,4 +93,8 @@ def read_json(path: Path) -> TranscriptionResult:
         compute_type=payload.get("compute_type", "unknown"),
         batch_size=payload.get("batch_size", 1),
         profile=payload.get("profile", "balanced"),
+        beam_size=payload.get("beam_size", 1),
+        audio_language=payload.get("audio_language"),
+        audio_format_id=payload.get("audio_format_id"),
+        audio_selection=payload.get("audio_selection"),
     )

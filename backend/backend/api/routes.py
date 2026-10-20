@@ -1,5 +1,6 @@
 import asyncio
 import shutil
+from pathlib import PureWindowsPath
 from typing import Annotated
 
 from fastapi import APIRouter, Form, HTTPException, UploadFile
@@ -21,7 +22,7 @@ from backend.core.audio import check_ffmpeg_available
 from backend.core.downloader import AudioQuality
 from backend.core.errors import TranscriberError, UnsupportedURLError
 from backend.core.history import history_store
-from backend.core.job_manager import JobStatus, job_manager
+from backend.core.job_manager import JobRecord, JobStatus, job_manager
 from backend.core.model_manager import (
     get_gpu_memory_mb,
     resolve_batch_size,
@@ -78,7 +79,9 @@ async def create_job_from_url(payload: CreateJobFromUrlRequest) -> JobResponse:
             status_code=400, detail={"code": exc.code, "message": exc.message}
         ) from exc
 
-    cached = history_store.find_cached(payload.url, payload.profile, payload.audio_quality)
+    cached = None if payload.force else history_store.find_cached(
+        payload.url, payload.profile, payload.audio_quality
+    )
     if cached:
         cached_id, result = cached
         job = job_manager.create_job(cached_id)
@@ -103,28 +106,58 @@ async def create_job_from_upload(
     file: UploadFile,
     profile: Annotated[TranscriptionProfile, Form()] = "balanced",
 ) -> JobResponse:
-    if not file.content_type or not (
-        file.content_type.startswith("audio/") or file.content_type.startswith("video/")
-    ):
-        raise HTTPException(status_code=400, detail="Solo se admiten archivos de audio o vídeo")
+    job = None
+    upload_dir = None
+    try:
+        if not file.content_type or not file.content_type.startswith(("audio/", "video/")):
+            raise HTTPException(status_code=400, detail="Solo se admiten archivos de audio o vídeo")
+        if file.size is not None and file.size > settings.max_upload_bytes:
+            raise HTTPException(status_code=413, detail="El archivo supera el tamaño permitido")
+        job = job_manager.create_job()
+        upload_dir = settings.temp_dir / job.id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        # Never use a client-supplied filename as a filesystem path.
+        dest_path = upload_dir / "upload.media"
+        size = 0
+        with dest_path.open("wb") as output:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > settings.max_upload_bytes:
+                    raise HTTPException(status_code=413, detail="El archivo supera el tamaño permitido")
+                output.write(chunk)
+        if not size:
+            raise HTTPException(status_code=400, detail="El archivo está vacío")
+    except BaseException:
+        if upload_dir is not None:
+            shutil.rmtree(upload_dir, ignore_errors=True)
+        if job is not None:
+            job_manager.set_error(job.id, "upload_failed", "No se pudo guardar el archivo subido")
+        raise
+    finally:
+        await file.close()
 
-    job = job_manager.create_job()
-    upload_dir = settings.temp_dir / job.id
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    dest_path = upload_dir / (file.filename or "upload")
-    with dest_path.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
-
-    source = FileSource(path=dest_path, original_name=file.filename or "archivo subido")
+    source = FileSource(
+        path=dest_path, original_name=PureWindowsPath(file.filename or "archivo subido").name
+    )
     asyncio.create_task(asyncio.to_thread(_run_job, job.id, source, profile, "best"))
     return JobResponse(id=job.id, status=job.status)
 
 
-@router.get("/jobs/{job_id}", response_model=JobStatusResponse)
-async def get_job_status(job_id: str) -> JobStatusResponse:
+def _get_job(job_id: str) -> JobRecord:
     job = job_manager.get_job(job_id)
     if job is None:
+        result = history_store.load_result(job_id)
+        if result is not None:
+            job = job_manager.create_job(job_id)
+            job_manager.set_result(job_id, result, "Resultado recuperado del historial.")
+    if job is None:
         raise HTTPException(status_code=404, detail="No se encontró la transcripción")
+    return job
+
+
+@router.get("/jobs/{job_id}", response_model=JobStatusResponse)
+async def get_job_status(job_id: str) -> JobStatusResponse:
+    job = _get_job(job_id)
     return JobStatusResponse(
         id=job.id,
         status=job.status,
@@ -147,9 +180,7 @@ async def cancel_job(job_id: str) -> JobResponse:
 
 @router.get("/jobs/{job_id}/result", response_model=TranscriptResultSchema)
 async def get_job_result(job_id: str) -> TranscriptResultSchema:
-    job = job_manager.get_job(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="No se encontró la transcripción")
+    job = _get_job(job_id)
     if job.status != "completed" or job.result is None:
         raise HTTPException(status_code=409, detail="La transcripción todavía no ha terminado")
     result = job.result
@@ -176,11 +207,15 @@ async def get_job_result(job_id: str) -> TranscriptResultSchema:
         compute_type=result.compute_type,
         batch_size=result.batch_size,
         profile=result.profile,
+        audio_language=result.audio_language,
+        audio_format_id=result.audio_format_id,
+        audio_selection=result.audio_selection,
     )
 
 
 @router.get("/jobs/{job_id}/download/{fmt}")
 async def download_export(job_id: str, fmt: str) -> FileResponse:
+    _get_job(job_id)
     filename = _ALLOWED_EXPORT_FORMATS.get(fmt)
     if filename is None:
         raise HTTPException(status_code=404, detail="El formato de exportación no es compatible")
@@ -191,13 +226,18 @@ async def download_export(job_id: str, fmt: str) -> FileResponse:
 
 
 @router.get("/history", response_model=list[HistoryItemSchema])
-async def list_history() -> list[dict]:
-    return history_store.list_entries()
+async def list_history(q: str = "") -> list[dict]:
+    return history_store.list_entries(q)
 
 
 @router.delete("/history/{item_id}", status_code=204)
-async def delete_history_item(item_id: str) -> None:
-    history_store.delete_entry(item_id)
+async def delete_history_item(item_id: str, delete_files: bool = False) -> None:
+    job = job_manager.get_job(item_id)
+    if job and job.status not in {"completed", "failed", "cancelled"}:
+        raise HTTPException(status_code=409, detail="El trabajo sigue en curso")
+    if not history_store.delete_entry(item_id, delete_files):
+        raise HTTPException(status_code=404, detail="No se encontró la transcripción")
+    job_manager.remove_job(item_id)
 
 
 @router.get("/health", response_model=HealthResponse)

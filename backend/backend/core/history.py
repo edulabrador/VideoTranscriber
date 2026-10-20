@@ -1,12 +1,17 @@
 import json
+import re
+import shutil
 import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from backend.config import settings
-from backend.core.exporter import read_json
-from backend.core.transcriber import TranscriptionProfile, TranscriptionResult
+from backend.core.exporter import PROCESSING_VERSION, read_json
+from backend.core.model_manager import resolve_model_size, select_device_and_compute_type
+from backend.core.transcriber import (
+    TranscriptionProfile, TranscriptionResult, resolve_profile_settings,
+)
 
 _QUALITY_RANK = {"compact": 0, "balanced": 1, "best": 2}
 
@@ -60,7 +65,32 @@ class HistoryStore:
 
     def _write(self, entries: list[dict]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(entries, indent=2, ensure_ascii=False), encoding="utf-8")
+        temporary = self._path.with_suffix(".tmp")
+        try:
+            temporary.write_text(json.dumps(entries, indent=2, ensure_ascii=False), encoding="utf-8")
+            temporary.replace(self._path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _job_dir(self, item_id: str) -> Path | None:
+        if not re.fullmatch(r"job_[A-Za-z0-9_-]{1,64}", item_id):
+            return None
+        path = self._output_dir / item_id
+        if path.is_symlink() or path.resolve().parent != self._output_dir.resolve():
+            return None
+        return path
+
+    def load_result(self, item_id: str) -> TranscriptionResult | None:
+        with self._lock:
+            if not any(entry.get("id") == item_id for entry in self._read()):
+                return None
+            path = self._job_dir(item_id)
+            if path is None:
+                return None
+            try:
+                return read_json(path / "transcript.json")
+            except (KeyError, TypeError, ValueError, OSError):
+                return None
 
     def add_entry(self, item: HistoryItem) -> None:
         with self._lock:
@@ -69,16 +99,28 @@ class HistoryStore:
             entries = entries[: self._max_entries]
             self._write(entries)
 
-    def list_entries(self) -> list[dict]:
+    def list_entries(self, query: str = "") -> list[dict]:
         with self._lock:
             entries = self._read()
-            for entry in entries[:2]:
-                transcript_path = self._output_dir / entry["id"] / "transcript.txt"
+            matches: list[dict] = []
+            query = query.strip().casefold()
+            for entry in entries:
+                path = self._job_dir(entry["id"])
+                if path is None:
+                    continue
+                text = ""
                 try:
-                    entry["text"] = transcript_path.read_text(encoding="utf-8")
+                    if query or len(matches) < 2:
+                        text = (path / "transcript.txt").read_text(encoding="utf-8")
                 except OSError:
                     pass
-            return entries
+                searchable = " ".join((entry.get("title", ""), entry.get("source", ""), text))
+                if query and query not in searchable.casefold():
+                    continue
+                if text and len(matches) < 2:
+                    entry["text"] = text
+                matches.append(entry)
+            return matches
 
     def find_cached(
         self,
@@ -87,13 +129,19 @@ class HistoryStore:
         audio_quality: str,
     ) -> tuple[str, TranscriptionResult] | None:
         source_key = _source_key(source)
+        model, beam_size = resolve_profile_settings(profile, settings.model_size, settings.beam_size)
+        device, _ = select_device_and_compute_type(settings.device)
+        model = resolve_model_size(model, device)
         with self._lock:
             entries = self._read()
 
         for entry in entries:
             if _source_key(entry.get("source", "")) != source_key:
                 continue
-            transcript_path = self._output_dir / entry["id"] / "transcript.json"
+            job_dir = self._job_dir(entry["id"])
+            if job_dir is None:
+                continue
+            transcript_path = job_dir / "transcript.json"
             try:
                 payload = json.loads(transcript_path.read_text(encoding="utf-8"))
                 cached_profile = payload.get("profile", "balanced")
@@ -101,18 +149,29 @@ class HistoryStore:
                 quality_is_sufficient = _QUALITY_RANK.get(cached_quality, 0) >= _QUALITY_RANK[
                     audio_quality
                 ]
-                if cached_profile == profile and quality_is_sufficient:
+                compatible = (
+                    payload.get("processing_version") == PROCESSING_VERSION
+                    and payload.get("model_size") == model
+                    and payload.get("beam_size") == beam_size
+                )
+                if compatible and cached_profile == profile and quality_is_sufficient:
                     return entry["id"], read_json(transcript_path)
             except (KeyError, OSError, ValueError, json.JSONDecodeError):
                 continue
         return None
 
-    def delete_entry(self, item_id: str) -> bool:
+    def delete_entry(self, item_id: str, delete_files: bool = False) -> bool:
         with self._lock:
             entries = self._read()
             filtered = [e for e in entries if e["id"] != item_id]
             if len(filtered) == len(entries):
                 return False
+            if delete_files:
+                path = self._job_dir(item_id)
+                if path is None:
+                    return False
+                if path.exists():
+                    shutil.rmtree(path)
             self._write(filtered)
             return True
 

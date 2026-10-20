@@ -8,6 +8,7 @@ import type { JobResponse, TranscriptionProfile } from "../api/types";
 export function FileDropZone({ profile }: { profile: TranscriptionProfile }) {
   const { state, dispatch } = useJobContext();
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const jobActive = Boolean(
     state.status && !["completed", "failed", "cancelled"].includes(state.status),
   );
@@ -17,6 +18,7 @@ export function FileDropZone({ profile }: { profile: TranscriptionProfile }) {
       const file = accepted[0];
       if (!file) return;
       setError(null);
+      setUploading(true);
       const form = new FormData();
       form.append("file", file);
       form.append("profile", profile);
@@ -25,7 +27,7 @@ export function FileDropZone({ profile }: { profile: TranscriptionProfile }) {
         dispatch({ type: "START_JOB", jobId: job.id });
       } catch (err) {
         setError(err instanceof Error ? err.message : "No se pudo subir el archivo");
-      }
+      } finally { setUploading(false); }
     },
     [dispatch, profile],
   );
@@ -34,7 +36,7 @@ export function FileDropZone({ profile }: { profile: TranscriptionProfile }) {
     onDrop,
     accept: { "audio/*": [], "video/*": [] },
     multiple: false,
-    disabled: jobActive,
+    disabled: jobActive || uploading,
   });
 
   return (
@@ -57,7 +59,7 @@ export function FileDropZone({ profile }: { profile: TranscriptionProfile }) {
           </svg>
         </div>
         <p className="font-bold text-stone-800 dark:text-stone-100">
-          {jobActive ? "Ya hay una transcripción en curso" : "Suelta aquí tu archivo"}
+          {uploading ? "Subiendo archivo..." : jobActive ? "Ya hay una transcripción en curso" : "Suelta aquí tu archivo"}
         </p>
         {!jobActive && <p className="mt-1 text-xs">o haz clic para seleccionarlo · audio o vídeo</p>}
       </div>

@@ -1,5 +1,6 @@
 export type JobStatus =
   | "queued"
+  | "loading_model"
   | "downloading"
   | "extracting_audio"
   | "transcribing"
@@ -56,6 +57,9 @@ export interface TranscriptResult {
   compute_type: string;
   batch_size: number;
   profile: TranscriptionProfile;
+  audio_language?: string | null;
+  audio_format_id?: string | null;
+  audio_selection?: "original" | "default" | null;
 }
 
 export interface HistoryItem {

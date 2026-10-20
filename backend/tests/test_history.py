@@ -4,6 +4,10 @@ import unittest
 from pathlib import Path
 
 from backend.core.history import HistoryStore, _source_key
+from backend.core.exporter import PROCESSING_VERSION
+from backend.config import settings
+from backend.core.transcriber import resolve_profile_settings
+from backend.core.model_manager import resolve_model_size, select_device_and_compute_type
 
 
 class HistoryStoreTests(unittest.TestCase):
@@ -58,11 +62,16 @@ class HistoryStoreTests(unittest.TestCase):
                         "language_probability": 0.99,
                         "duration": 10,
                         "text": "texto guardado",
-                        "model_size": "large-v3-turbo",
+                        "model_size": resolve_model_size(
+                            resolve_profile_settings("balanced", settings.model_size, settings.beam_size)[0],
+                            select_device_and_compute_type(settings.device)[0],
+                        ),
                         "device": "cuda",
                         "compute_type": "int8_float16",
                         "batch_size": 4,
                         "profile": "balanced",
+                        "processing_version": PROCESSING_VERSION,
+                        "beam_size": settings.beam_size,
                         "audio_quality": "best",
                         "segments": [],
                     }

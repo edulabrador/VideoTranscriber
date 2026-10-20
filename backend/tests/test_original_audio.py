@@ -219,7 +219,7 @@ def test_progress_hook_and_cancellation_during_download(tmp_path, fake_ydl):
 
     with pytest.raises(JobCancelledError):
         download_media(YOUTUBE_URL, tmp_path, None, event, on_progress=on_progress)
-    assert progress == [("Descargando audio... 50 %", 50)]
+    assert progress == [("Descargando audio... 50 % · audio: es (original)", 50)]
     assert fake_ydl.instances[0].calls == [("extract", False), ("process", True)]
 
 

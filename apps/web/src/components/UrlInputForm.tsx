@@ -16,6 +16,7 @@ export function UrlInputForm({
   const [url, setUrl] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [force, setForce] = useState(false);
   const jobActive = Boolean(
     state.status && !["completed", "failed", "cancelled"].includes(state.status),
   );
@@ -43,6 +44,7 @@ export function UrlInputForm({
         url,
         profile,
         audio_quality: audioQuality,
+        force,
       });
       dispatch({ type: "START_JOB", jobId: job.id });
     } catch (err) {
@@ -88,6 +90,10 @@ export function UrlInputForm({
         </button>
       </div>
       {validationError && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950/30 dark:text-red-400">{validationError}</p>}
+      <label className="flex items-center gap-2 text-xs text-stone-600 dark:text-stone-300">
+        <input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} disabled={jobActive || submitting} />
+        Volver a transcribir, aunque exista un resultado guardado
+      </label>
       <button
         type="submit"
         disabled={submitting || jobActive || !url}
