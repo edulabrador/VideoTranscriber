@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { postJson } from "../api/client";
 import { useJobContext } from "../context/JobContext";
+import { Icon } from "./Icon";
 
 export function CancelButton() {
   const { state, dispatch } = useJobContext();
@@ -14,7 +15,13 @@ export function CancelButton() {
       await postJson(`/api/jobs/${state.jobId}/cancel`, {});
     } catch (error) {
       setCancelling(false);
-      dispatch({ type: "CONNECTION_ERROR", message: error instanceof Error ? error.message : "No se pudo cancelar. Puedes intentarlo de nuevo." });
+      dispatch({
+        type: "CONNECTION_ERROR",
+        message:
+          error instanceof Error
+            ? error.message
+            : "No se pudo cancelar. Puedes intentarlo de nuevo.",
+      });
     }
   };
 
@@ -23,8 +30,9 @@ export function CancelButton() {
       type="button"
       onClick={handleCancel}
       disabled={cancelling}
-      className="rounded-xl border border-stone-200 px-3 py-1.5 text-xs font-medium text-stone-600 transition hover:bg-stone-50 disabled:opacity-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
+      className="secondary-button"
     >
+      <Icon name="close" size={12} />
       {cancelling ? "Cancelando..." : "Cancelar"}
     </button>
   );

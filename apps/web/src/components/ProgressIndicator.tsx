@@ -1,61 +1,88 @@
+import type { JobStatus } from "../api/types";
 import { useJobContext } from "../context/JobContext";
 import { CancelButton } from "./CancelButton";
+import { Icon } from "./Icon";
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const LABELS: Record<JobStatus, string> = {
+  queued: "Esperando tu turno",
+  downloading: "Preparando tu audio",
+  extracting_audio: "Preparando el archivo",
+  loading_model: "Preparando el modelo",
+  transcribing: "Dando forma al texto",
+  exporting: "Últimos detalles",
+  completed: "Tu texto está listo",
+  failed: "No hemos podido terminar",
+  cancelling: "Cancelando la transcripción",
+  cancelled: "Transcripción cancelada",
+};
 
 export function ProgressIndicator() {
   const { state } = useJobContext();
   if (!state.jobId || !state.status) return null;
-
   const isTerminal = TERMINAL_STATUSES.has(state.status);
   const isError = state.status === "failed";
-  const isTranscribing = state.status === "transcribing";
-  const isIndeterminate = !isTerminal && (
-    state.status === "loading_model" || state.status === "queued"
-    || (state.status === "downloading" && state.progressPercent <= 1)
-    || (isTranscribing && !state.stageMessage.includes("%"))
-  );
+  const isIndeterminate =
+    !isTerminal &&
+    (state.status === "loading_model" ||
+      state.status === "queued" ||
+      (state.status === "downloading" && state.progressPercent <= 1) ||
+      (state.status === "transcribing" && !state.stageMessage.includes("%")));
+  const percent =
+    state.status === "completed" ? 100 : Math.round(state.progressPercent);
 
   return (
-    <div className={`flex flex-col gap-3 rounded-2xl border bg-white/85 p-5 shadow-soft backdrop-blur dark:bg-stone-900/85 ${isError ? "border-red-200 dark:border-red-900" : "border-stone-200/80 dark:border-stone-800"}`}>
-      {state.connectionMessage && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">{state.connectionMessage}</p>}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
-          <span className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${isError ? "bg-red-500" : "animate-pulse bg-brand-500"}`} />
-          <div>
-            <p className={`text-sm font-semibold ${isError ? "text-red-600 dark:text-red-400" : "text-stone-700 dark:text-stone-200"}`}>
-              {isError && state.error ? state.error.message : state.stageMessage}
-            </p>
-            {!isTerminal && (
-              <p className="mt-1 text-xs text-stone-400">
-                {isTranscribing
-                  ? isIndeterminate
-                    ? "El progreso aparecerá cuando termine la preparación del audio."
-                    : "Progreso basado en los segundos de audio ya procesados."
-                  : `${Math.round(state.progressPercent)} % completado`}
-              </p>
+    <section
+      className={`panel progress-panel ${isError ? "error-state" : ""}`}
+      aria-label="Estado de la transcripción"
+    >
+      {state.connectionMessage && (
+        <p role="alert" className="message warning">
+          {state.connectionMessage}
+        </p>
+      )}
+      <div className="progress-head">
+        <div className="progress-heading">
+          <span className={`status-orb ${isTerminal ? "" : "working"}`}>
+            {isTerminal && (
+              <Icon
+                name={state.status === "completed" ? "check" : "close"}
+                size={15}
+              />
             )}
-          </div>
+          </span>
+          <h2>{LABELS[state.status]}</h2>
         </div>
         {!isTerminal && <CancelButton />}
       </div>
+      <p className="progress-detail" aria-live="polite">
+        {isError && state.error ? state.error.message : state.stageMessage}
+      </p>
+      <div className="progress-meta">
+        <span>
+          {state.status === "completed"
+            ? "Una idea más en tu biblioteca."
+            : isTerminal
+              ? "Puedes iniciar una nueva transcripción."
+              : isIndeterminate
+                ? "Preparando todo para empezar."
+                : "Progreso de tu transcripción"}
+        </span>
+        <strong>{isIndeterminate ? "En curso" : `${percent} %`}</strong>
+      </div>
       <div
-        className="h-2 w-full overflow-hidden rounded-full bg-stone-100 dark:bg-stone-800"
+        className="progress-track"
         role="progressbar"
         aria-label="Progreso de la transcripción"
-        aria-valuenow={isIndeterminate ? undefined : Math.round(state.progressPercent)}
+        aria-valuenow={isIndeterminate ? undefined : percent}
         aria-valuemin={0}
         aria-valuemax={100}
       >
         <div
-          className={`h-full rounded-full ${
-            isIndeterminate ? "w-1/3 animate-loading" : "transition-all duration-500"
-          } ${
-            isError ? "bg-red-400" : "bg-gradient-to-r from-brand-700 via-brand-500 to-cyan-400"
-          }`}
-          style={isIndeterminate ? undefined : { width: `${state.progressPercent}%` }}
+          className={`progress-fill ${isIndeterminate ? "indeterminate" : ""}`}
+          style={isIndeterminate ? undefined : { width: `${percent}%` }}
         />
       </div>
-    </div>
+    </section>
   );
 }

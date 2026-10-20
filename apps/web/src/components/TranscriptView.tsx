@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 
 import type { TranscriptResult } from "../api/types";
 import { CopyButton } from "./CopyButton";
 import { ExportMenu } from "./ExportMenu";
+import { Icon } from "./Icon";
 
 const PROFILE_LABELS = {
   fast: "Rápido",
@@ -16,61 +17,87 @@ function formatTimestamp(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
-export function TranscriptView({ jobId, result }: { jobId: string; result: TranscriptResult }) {
+export function TranscriptView({
+  jobId,
+  result,
+}: {
+  jobId: string;
+  result: TranscriptResult;
+}) {
   const [showTimestamps, setShowTimestamps] = useState(true);
-
   return (
-    <section className="flex flex-col gap-4 rounded-[1.75rem] border border-stone-200/80 bg-white/90 p-4 shadow-soft backdrop-blur dark:border-stone-800 dark:bg-stone-900/90 sm:p-6">
-      <div className="flex items-center justify-between gap-4">
+    <section
+      className="panel transcript-panel"
+      id="transcript"
+      aria-labelledby="transcript-title"
+    >
+      <div className="transcript-header">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-brand-600 dark:text-brand-400">Resultado</p>
-          <h2 className="mt-1 text-xl font-extrabold">Transcripción</h2>
+          <p className="eyebrow">LO QUE MERECE QUEDARSE</p>
+          <h2 id="transcript-title">Tu transcripción</h2>
         </div>
-        <label className="flex items-center gap-2 text-xs font-medium text-stone-500 dark:text-stone-400">
+        <span className="ready-label">
+          <Icon name="check" size={12} />
+          Lista para usar
+        </span>
+      </div>
+      <div className="transcript-metadata">
+        <span>
+          <Icon name="clock" size={13} />
+          {formatTimestamp(result.duration)}
+        </span>
+        <span>{result.word_count} palabras</span>
+        <span>Idioma: {result.language.toUpperCase()}</span>
+        {result.audio_selection && (
+          <span>
+            {result.audio_selection === "original"
+              ? `Audio: ${result.audio_language ?? "?"} (original)`
+              : "Audio: pista por defecto, no identificada"}
+          </span>
+        )}
+      </div>
+      <div className="transcript-toolbar">
+        <span>TEXTO COMPLETO</span>
+        <label className="checkbox-label">
           <input
             type="checkbox"
             checked={showTimestamps}
-            onChange={(e) => setShowTimestamps(e.target.checked)}
-            className="accent-brand-500"
+            onChange={(event) => setShowTimestamps(event.target.checked)}
           />
-          Tiempos
+          Mostrar tiempos
         </label>
       </div>
-
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <Badge>Idioma: {result.language.toUpperCase()} ({Math.round(result.language_probability * 100)} %)</Badge>
-        <Badge>Duración: {formatTimestamp(result.duration)}</Badge>
-        <Badge>{result.word_count} palabras</Badge>
-        <Badge>Perfil: {PROFILE_LABELS[result.profile]}</Badge>
-        {result.audio_selection && <Badge>{result.audio_selection === "original"
-          ? `Audio: ${result.audio_language ?? "?"} (original)${result.audio_format_id ? ` · ${result.audio_format_id}` : ""}`
-          : "Audio: pista por defecto, no identificada"}</Badge>}
-        <Badge>Modelo: {result.model_size} · {result.device} · lote {result.batch_size}</Badge>
+      <div className="transcript-text">
+        {result.segments.length ? (
+          result.segments.map((segment, index) => (
+            <p key={index}>
+              {showTimestamps && (
+                <span className="timestamp">
+                  {formatTimestamp(segment.start)}
+                </span>
+              )}
+              {segment.text}
+            </p>
+          ))
+        ) : (
+          <p>{result.text || "No se detectó voz en este archivo."}</p>
+        )}
       </div>
-
-      <div className="max-h-96 space-y-2 overflow-y-auto rounded-2xl bg-stone-50 p-4 text-sm leading-7 text-stone-700 dark:bg-stone-950/55 dark:text-stone-200 sm:p-5">
-        {result.segments.map((seg, i) => (
-          <p key={i}>
-            {showTimestamps && (
-              <span className="mr-2 font-mono text-xs text-brand-500">[{formatTimestamp(seg.start)}]</span>
-            )}
-            {seg.text}
-          </p>
-        ))}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="transcript-actions">
         <CopyButton text={result.text} />
         <ExportMenu jobId={jobId} />
       </div>
+      <details className="transcript-tech">
+        <summary>Detalles de transcripción</summary>
+        <p>
+          Perfil {PROFILE_LABELS[result.profile]} · Modelo {result.model_size} ·{" "}
+          {result.device} · Lote {result.batch_size} · Idioma detectado con{" "}
+          {Math.round(result.language_probability * 100)} % de confianza
+          {result.audio_format_id
+            ? ` · Formato de audio ${result.audio_format_id}`
+            : ""}
+        </p>
+      </details>
     </section>
-  );
-}
-
-function Badge({ children }: { children: ReactNode }) {
-  return (
-    <span className="rounded-full bg-stone-100 px-2.5 py-1 font-medium text-stone-600 dark:bg-stone-800 dark:text-stone-300">
-      {children}
-    </span>
   );
 }
