@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 
 import { postForm } from "../api/client";
+import { isTerminalStatus } from "../api/types";
 import { useJobContext } from "../context/JobContext";
 import type { JobResponse, TranscriptionProfile } from "../api/types";
 import { Icon } from "./Icon";
@@ -10,10 +11,7 @@ export function FileDropZone({ profile }: { profile: TranscriptionProfile }) {
   const { state, dispatch } = useJobContext();
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const jobActive = Boolean(
-    state.status &&
-    !["completed", "failed", "cancelled"].includes(state.status),
-  );
+  const jobActive = Boolean(state.status && !isTerminalStatus(state.status));
   const disabled = jobActive || uploading;
 
   const onDrop = useCallback(

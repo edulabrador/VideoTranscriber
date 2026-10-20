@@ -14,7 +14,7 @@ from backend.core.model_manager import (
     resolve_batch_size,
     resolve_compute_type,
     resolve_model_size,
-    select_device_and_compute_type,
+    select_device,
 )
 
 ProgressCallback = Callable[[int, int | None], None]
@@ -52,6 +52,7 @@ class TranscriptionResult:
     audio_language: str | None = None
     audio_format_id: str | None = None
     audio_selection: Literal["original", "default"] | None = None
+    timings: dict[str, float] = field(default_factory=dict)
 
     @property
     def word_count(self) -> int:
@@ -82,7 +83,7 @@ def transcribe_audio(
     on_progress: ProgressCallback | None = None,
     on_status: Callable[[Literal["loading_model", "transcribing"], str], None] | None = None,
 ) -> TranscriptionResult:
-    device, _ = select_device_and_compute_type(device_preference)
+    device = select_device(device_preference)
     model_size_preference, beam_size = resolve_profile_settings(
         profile,
         model_size_preference,
@@ -93,6 +94,7 @@ def transcribe_audio(
     compute_type = resolve_compute_type(compute_type_preference, device)
     batch_size = resolve_batch_size(batch_size, device, profile)
 
+    load_started = time.perf_counter()
     try:
         if cancel_event.is_set():
             raise JobCancelledError()
@@ -104,6 +106,7 @@ def transcribe_audio(
             )
             on_status("loading_model", message)
         model = get_model(model_size, device, compute_type)
+        model_loading_seconds = time.perf_counter() - load_started
     except JobCancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 - surface as a typed transcription error
@@ -114,6 +117,7 @@ def transcribe_audio(
             raise JobCancelledError()
         if on_status:
             on_status("transcribing", "Modelo listo. Analizando el audio...")
+        analysis_started = time.perf_counter()
         transcriber = BatchedInferencePipeline(model=model) if device == "cuda" and batch_size > 1 else model
         options = {
             "vad_filter": True,
@@ -123,10 +127,11 @@ def transcribe_audio(
         if isinstance(transcriber, BatchedInferencePipeline):
             options["batch_size"] = batch_size
         segment_iter, info = transcriber.transcribe(str(audio_path), **options)
+        audio_analysis_seconds = time.perf_counter() - analysis_started
 
         segments: list[TranscriptSegment] = []
         text_parts: list[str] = []
-        started_at = time.monotonic()
+        started_at = time.perf_counter()
         last_progress = -1
         for seg in segment_iter:
             if cancel_event.is_set():
@@ -143,7 +148,7 @@ def transcribe_audio(
             if on_progress and info.duration > 0:
                 progress = min(99, max(0, round(seg.end * 100 / info.duration)))
                 if progress > last_progress:
-                    elapsed = time.monotonic() - started_at
+                    elapsed = time.perf_counter() - started_at
                     eta = round(elapsed * (100 - progress) / progress) if progress >= 2 else None
                     on_progress(progress, eta)
                     last_progress = progress
@@ -151,6 +156,7 @@ def transcribe_audio(
             raise JobCancelledError()
         if on_progress:
             on_progress(100, 0)
+        transcription_seconds = time.perf_counter() - started_at
     except JobCancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 - wrap unexpected whisper/ctranslate2 errors
@@ -168,4 +174,9 @@ def transcribe_audio(
         batch_size=batch_size,
         profile=profile,
         beam_size=beam_size,
+        timings={
+            "model_loading": model_loading_seconds,
+            "audio_analysis": audio_analysis_seconds,
+            "transcription": transcription_seconds,
+        },
     )

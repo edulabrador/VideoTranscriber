@@ -25,17 +25,10 @@ CUDA_DEFAULT_MODEL = "large-v3-turbo"
 CPU_DEFAULT_MODEL = "large-v3-turbo"
 
 
-def select_device_and_compute_type(preference: str = "auto") -> tuple[str, str]:
-    if preference == "cuda":
-        return "cuda", "float16"
-    if preference == "cpu":
-        return "cpu", "int8"
-
-    if ctranslate2.get_cuda_device_count() > 0:
-        return "cuda", "float16"
-    # CPU covers Apple Silicon too — CTranslate2 has no Metal/MPS backend, so
-    # there is no GPU acceleration path on Apple Silicon, only CPU int8.
-    return "cpu", "int8"
+def select_device(preference: str = "auto") -> str:
+    if preference in {"cuda", "cpu"}:
+        return preference
+    return "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
 
 
 def resolve_model_size(configured: str, device: str) -> str:
@@ -137,7 +130,7 @@ def is_model_cached(model_size: str) -> bool:
 
 
 def load_model_for_settings() -> tuple[WhisperModel, str, str, str]:
-    device, _ = select_device_and_compute_type(settings.device)
+    device = select_device(settings.device)
     model_size = resolve_model_size(settings.model_size, device)
     compute_type = resolve_compute_type(settings.compute_type, device)
     model = get_model(model_size, device, compute_type)

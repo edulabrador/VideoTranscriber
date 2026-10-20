@@ -1,11 +1,11 @@
 import { useEffect } from "react";
 
 import { ApiError, getJson } from "../api/client";
+import { isTerminalStatus } from "../api/types";
 import { useJobContext } from "../context/JobContext";
 import { loadJobUpdate } from "../lib/jobPolling";
 
 const POLL_INTERVAL_MS = 1500;
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 export function useJobPolling() {
   const { state, dispatch } = useJobContext();
@@ -40,7 +40,7 @@ export function useJobPolling() {
 
         if (result) dispatch({ type: "SET_RESULT", result });
 
-        if (!cancelled && !TERMINAL_STATUSES.has(job.status)) {
+        if (!cancelled && !isTerminalStatus(job.status)) {
           timer = setTimeout(poll, POLL_INTERVAL_MS);
         }
       } catch (error) {

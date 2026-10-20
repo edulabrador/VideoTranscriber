@@ -16,7 +16,7 @@ jobs:
           python-version: "3.12"
       - run: uv sync --project backend --locked --extra dev
       - run: uv run --project backend --extra dev pytest backend/tests -q
-      - run: uv run --project backend --extra dev ruff check backend/backend backend/tests
+      - run: uv run --project backend --extra dev ruff check backend/backend backend/tests scripts/benchmark.py
       - run: uv run --project backend --extra dev mypy --config-file backend/pyproject.toml backend/backend
   frontend:
     runs-on: ubuntu-latest

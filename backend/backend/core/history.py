@@ -7,8 +7,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from backend.config import settings
-from backend.core.exporter import PROCESSING_VERSION, read_json
-from backend.core.model_manager import resolve_model_size, select_device_and_compute_type
+from backend.core.exporter import PROCESSING_VERSION, read_json, result_from_payload
+from backend.core.model_manager import resolve_model_size, select_device
 from backend.core.transcriber import (
     TranscriptionProfile, TranscriptionResult, resolve_profile_settings,
 )
@@ -111,14 +111,15 @@ class HistoryStore:
                 text = ""
                 try:
                     if query or len(matches) < 2:
-                        text = (path / "transcript.txt").read_text(encoding="utf-8")
+                        with (path / "transcript.txt").open(encoding="utf-8") as transcript:
+                            text = transcript.read() if query else transcript.read(240)
                 except OSError:
                     pass
                 searchable = " ".join((entry.get("title", ""), entry.get("source", ""), text))
                 if query and query not in searchable.casefold():
                     continue
                 if text and len(matches) < 2:
-                    entry["text"] = text
+                    entry["text"] = text[:240]
                 matches.append(entry)
             return matches
 
@@ -130,7 +131,7 @@ class HistoryStore:
     ) -> tuple[str, TranscriptionResult] | None:
         source_key = _source_key(source)
         model, beam_size = resolve_profile_settings(profile, settings.model_size, settings.beam_size)
-        device, _ = select_device_and_compute_type(settings.device)
+        device = select_device(settings.device)
         model = resolve_model_size(model, device)
         with self._lock:
             entries = self._read()
@@ -155,8 +156,8 @@ class HistoryStore:
                     and payload.get("beam_size") == beam_size
                 )
                 if compatible and cached_profile == profile and quality_is_sufficient:
-                    return entry["id"], read_json(transcript_path)
-            except (KeyError, OSError, ValueError, json.JSONDecodeError):
+                    return entry["id"], result_from_payload(payload)
+            except (KeyError, TypeError, OSError, ValueError):
                 continue
         return None
 

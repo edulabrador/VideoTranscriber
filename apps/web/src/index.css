@@ -231,10 +231,6 @@ svg {
   font-size: 11px;
   color: var(--muted);
 }
-.topbar > p > span {
-  margin: 0 12px;
-  color: var(--line);
-}
 .topbar strong {
   color: var(--secondary);
   font-weight: 500;
@@ -1280,9 +1276,6 @@ input::placeholder {
   }
   .topbar > p {
     font-size: 9px;
-  }
-  .topbar > p > span {
-    margin: 0 7px;
   }
   .local-label {
     display: none;

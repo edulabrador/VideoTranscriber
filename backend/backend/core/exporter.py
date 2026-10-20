@@ -62,6 +62,7 @@ def write_json(
         "audio_format_id": result.audio_format_id,
         "audio_selection": result.audio_selection,
         "audio_quality": audio_quality,
+        "timings": result.timings,
         "text": result.text,
         "segments": [asdict(seg) for seg in result.segments],
     }
@@ -70,7 +71,10 @@ def write_json(
 
 
 def read_json(path: Path) -> TranscriptionResult:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    return result_from_payload(json.loads(path.read_text(encoding="utf-8")))
+
+
+def result_from_payload(payload: dict) -> TranscriptionResult:
     return TranscriptionResult(
         segments=[
             TranscriptSegment(
@@ -97,4 +101,5 @@ def read_json(path: Path) -> TranscriptionResult:
         audio_language=payload.get("audio_language"),
         audio_format_id=payload.get("audio_format_id"),
         audio_selection=payload.get("audio_selection"),
+        timings=payload.get("timings", {}),
     )

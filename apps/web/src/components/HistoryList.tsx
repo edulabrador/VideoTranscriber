@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { del, getJson } from "../api/client";
+import { isTerminalStatus } from "../api/types";
 import type { HistoryItem, TranscriptResult } from "../api/types";
 import { useJobContext } from "../context/JobContext";
 import { useHistory } from "../hooks/useHistory";
@@ -22,10 +23,7 @@ export function HistoryList() {
   const [busy, setBusy] = useState(false);
   const { entries, refresh, error } = useHistory(query);
   const { state, dispatch } = useJobContext();
-  const jobActive = Boolean(
-    state.status &&
-    !["completed", "failed", "cancelled"].includes(state.status),
-  );
+  const jobActive = Boolean(state.status && !isTerminalStatus(state.status));
 
   const open = async (id: string) => {
     setBusy(true);

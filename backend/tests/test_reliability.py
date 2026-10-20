@@ -167,13 +167,15 @@ def test_model_status_is_visible_before_inference(monkeypatch, result, cached):
     ))
     monkeypatch.setattr(transcriber, "get_model", lambda *_: model)
     monkeypatch.setattr(transcriber, "is_model_cached", lambda *_: cached)
-    transcriber.transcribe_audio(
+    measured = transcriber.transcribe_audio(
         Path("audio.wav"), "small", "cpu", "int8", threading.Event(),
         on_status=lambda status, message: statuses.append((status, message)),
     )
     assert statuses[0][0] == "loading_model"
     assert ("Cargando" if cached else "Descargando") in statuses[0][1]
     assert statuses[1][0] == "transcribing"
+    assert set(measured.timings) == {"model_loading", "audio_analysis", "transcription"}
+    assert all(value >= 0 for value in measured.timings.values())
 
 
 def test_cancelled_job_does_not_load_model(monkeypatch):
@@ -213,3 +215,90 @@ def test_pipeline_persists_original_audio_and_stages(tmp_path, monkeypatch, stor
     assert {"queued", "loading_model", "transcribing", "completed"} <= {s[0] for s in statuses}
     assert any("Audio: es (original)" in s[1] for s in statuses)
     assert not (settings.temp_dir / "job_pipeline").exists()
+    assert {"download", "queue", "processing_total"} <= saved.timings.keys()
+
+
+def test_history_previews_are_bounded_but_search_and_open_keep_full_text(client, store, result):
+    result.text = "inicio " * 500 + "término al final"
+    save_result(store, result)
+    preview = client.get("/api/history").json()[0]["text"]
+    assert preview == result.text[:240]
+    matches = client.get("/api/history", params={"q": "término al final"}).json()
+    assert matches[0]["id"] == "job_saved"
+    assert len(matches[0]["text"]) == 240
+    assert client.get("/api/jobs/job_saved/result").json()["text"] == result.text
+
+
+def test_cache_hit_reads_transcript_json_only_once(store, result, monkeypatch):
+    save_result(store, result)
+    real_read = Path.read_text
+    reads = []
+
+    def read(path, *args, **kwargs):
+        if path.name == "transcript.json":
+            reads.append(path)
+        return real_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    assert store.find_cached("https://youtu.be/video123", "balanced", "compact") is not None
+    assert len(reads) == 1
+
+
+def test_timings_survive_export_restart_and_api_and_legacy_files(client, store, result):
+    result.timings = {"model_loading": 1.25, "transcription": 2.5, "processing_total": 4.0}
+    save_result(store, result)
+    assert store.load_result("job_saved").timings == result.timings
+    assert client.get("/api/jobs/job_saved/result").json()["timings"] == result.timings
+    path = store._output_dir / "job_saved" / "transcript.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    del payload["timings"]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert store.load_result("job_saved").timings == {}
+
+
+def test_file_pipeline_passes_cancel_and_timeout_and_records_preparation(
+    tmp_path, monkeypatch, store, result,
+):
+    monkeypatch.setattr(settings, "temp_dir", tmp_path / "temp")
+    monkeypatch.setattr(settings, "audio_preparation_timeout_seconds", 7)
+    monkeypatch.setattr(pipeline, "history_store", store)
+    prepare = Mock(return_value=tmp_path / "audio.wav")
+    monkeypatch.setattr(pipeline, "normalize_to_wav16k_mono", prepare)
+    monkeypatch.setattr(pipeline, "transcribe_audio", lambda *_: result)
+    event = threading.Event()
+    measured = pipeline.run_pipeline(
+        "job_file", pipeline.FileSource(tmp_path / "input.mp4", "input.mp4"),
+        cancel_event=event, output_dir=store._output_dir / "job_file",
+    )
+    assert prepare.call_args.args[2] is event
+    assert prepare.call_args.kwargs["timeout"] == 7
+    assert "audio_preparation" in measured.timings
+    assert "download" not in measured.timings
+    assert measured.timings["processing_total"] >= measured.timings["audio_preparation"]
+
+
+def test_pipeline_cancellation_during_preparation_cleans_up_without_loading_model(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(settings, "temp_dir", tmp_path / "temp")
+    monkeypatch.setattr(pipeline, "normalize_to_wav16k_mono", Mock(side_effect=JobCancelledError()))
+    infer = Mock()
+    monkeypatch.setattr(pipeline, "transcribe_audio", infer)
+    with pytest.raises(JobCancelledError):
+        pipeline.run_pipeline("job_cancel", pipeline.FileSource(tmp_path / "a.mp4", "a.mp4"))
+    infer.assert_not_called()
+    assert not (settings.temp_dir / "job_cancel").exists()
+
+
+def test_inference_timings_measure_separate_stages(monkeypatch):
+    model = Mock()
+    model.transcribe.return_value = (iter([]), SimpleNamespace(
+        language="es", language_probability=1.0, duration=3,
+    ))
+    monkeypatch.setattr(transcriber, "get_model", lambda *_: model)
+    clock = iter([0.0, 2.0, 3.0, 5.0, 6.0, 7.0])
+    monkeypatch.setattr(transcriber.time, "perf_counter", lambda: next(clock))
+    measured = transcriber.transcribe_audio(
+        Path("audio.wav"), "small", "cpu", "int8", threading.Event(),
+    )
+    assert measured.timings == {"model_loading": 2.0, "audio_analysis": 2.0, "transcription": 1.0}

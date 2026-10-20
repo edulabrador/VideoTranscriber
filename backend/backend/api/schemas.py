@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.core.job_manager import JobStatus
 
@@ -45,6 +45,7 @@ class TranscriptSegmentSchema(BaseModel):
 
 
 class TranscriptResultSchema(BaseModel):
+    timings: dict[str, float] = Field(default_factory=dict)
     segments: list[TranscriptSegmentSchema]
     language: str
     language_probability: float

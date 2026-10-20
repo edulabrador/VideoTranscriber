@@ -10,6 +10,10 @@ export type JobStatus =
   | "cancelling"
   | "cancelled";
 
+export function isTerminalStatus(status: JobStatus | null): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
+}
+
 export type TranscriptionProfile = "fast" | "balanced" | "precise";
 export type AudioQuality = "compact" | "balanced" | "best";
 
@@ -46,6 +50,7 @@ export interface TranscriptSegment {
 }
 
 export interface TranscriptResult {
+  timings?: Record<string, number>;
   segments: TranscriptSegment[];
   language: string;
   language_probability: number;

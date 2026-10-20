@@ -1,9 +1,9 @@
 import type { JobStatus } from "../api/types";
+import { isTerminalStatus } from "../api/types";
 import { useJobContext } from "../context/JobContext";
 import { CancelButton } from "./CancelButton";
 import { Icon } from "./Icon";
 
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const LABELS: Record<JobStatus, string> = {
   queued: "Esperando tu turno",
   downloading: "Preparando tu audio",
@@ -20,7 +20,7 @@ const LABELS: Record<JobStatus, string> = {
 export function ProgressIndicator() {
   const { state } = useJobContext();
   if (!state.jobId || !state.status) return null;
-  const isTerminal = TERMINAL_STATUSES.has(state.status);
+  const isTerminal = isTerminalStatus(state.status);
   const isError = state.status === "failed";
   const isIndeterminate =
     !isTerminal &&

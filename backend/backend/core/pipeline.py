@@ -1,5 +1,7 @@
 import shutil
 import threading
+import time
+import logging
 from math import ceil
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -18,6 +20,7 @@ from backend.core.transcriber import TranscriptionProfile, TranscriptionResult, 
 
 StageCallback = Callable[[JobStatus, str, int | None], None]
 _TRANSCRIPTION_LOCK = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -52,8 +55,12 @@ def run_pipeline(
     output_dir = output_dir or (settings.output_dir / job_id)
     job_temp_dir = settings.temp_dir / job_id
     job_temp_dir.mkdir(parents=True, exist_ok=True)
+    started_at = time.perf_counter()
+    timings: dict[str, float] = {}
 
     try:
+        if cancel_event.is_set():
+            raise JobCancelledError()
         if isinstance(source, URLSource):
             validators.validate_instagram_url(source.url)
 
@@ -72,6 +79,7 @@ def run_pipeline(
                 cobalt_api_url=settings.cobalt_api_url,
                 audio_quality=audio_quality,
             )
+            timings["download"] = time.perf_counter() - started_at
             raw_audio_path = download_result.audio_path
             title = download_result.title
             source_label = source.url
@@ -84,13 +92,18 @@ def run_pipeline(
             )
         else:
             on_stage("extracting_audio", "Preparando el audio del archivo subido...", 0)
-            raw_audio_path = normalize_to_wav16k_mono(source.path, job_temp_dir / "audio.wav")
+            raw_audio_path = normalize_to_wav16k_mono(
+                source.path, job_temp_dir / "audio.wav", cancel_event,
+                timeout=settings.audio_preparation_timeout_seconds,
+            )
+            timings["audio_preparation"] = time.perf_counter() - started_at
             title = source.original_name
             source_label = source.original_name
             source_type = "file"
             transcription_start = 0
             audio_label = "Audio: archivo subido"
 
+        queue_started = time.perf_counter()
         on_stage("queued", f"En cola. Esperando turno de procesamiento. {audio_label}", transcription_start)
         while not _TRANSCRIPTION_LOCK.acquire(timeout=0.25):
             if cancel_event.is_set():
@@ -111,6 +124,7 @@ def run_pipeline(
             )
 
         try:
+            timings["queue"] = time.perf_counter() - queue_started
             if cancel_event.is_set():
                 raise JobCancelledError()
             result = transcribe_audio(
@@ -135,9 +149,11 @@ def run_pipeline(
             _TRANSCRIPTION_LOCK.release()
 
         on_stage("exporting", "Preparando los archivos...", 99)
+        result.timings.update(timings)
         created_at = datetime.now(timezone.utc).isoformat()
         write_txt(result, output_dir / "transcript.txt")
         write_srt(result, output_dir / "subtitles.srt")
+        result.timings["processing_total"] = time.perf_counter() - started_at
         write_json(
             result,
             output_dir / "transcript.json",
@@ -159,6 +175,7 @@ def run_pipeline(
                 language=result.language,
             )
         )
+        logger.info("Job %s timings (seconds): %s", job_id, result.timings)
 
         on_stage("completed", "Transcripción completada.", 100)
         return result

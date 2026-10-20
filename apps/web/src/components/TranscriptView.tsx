@@ -11,6 +11,16 @@ const PROFILE_LABELS = {
   precise: "Preciso",
 };
 
+const TIMING_LABELS: Record<string, string> = {
+  download: "Descarga",
+  audio_preparation: "Preparación del archivo",
+  queue: "Espera en cola",
+  model_loading: "Carga del modelo",
+  audio_analysis: "Análisis del audio",
+  transcription: "Transcripción",
+  processing_total: "Total de procesamiento",
+};
+
 function formatTimestamp(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
@@ -97,6 +107,13 @@ export function TranscriptView({
             ? ` · Formato de audio ${result.audio_format_id}`
             : ""}
         </p>
+        {Object.keys(result.timings ?? {}).length > 0 && (
+          <p>
+            {Object.entries(result.timings ?? {}).map(([stage, seconds]) =>
+              `${TIMING_LABELS[stage] ?? stage}: ${seconds.toLocaleString("es", { maximumFractionDigits: 2 })} s`,
+            ).join(" · ")}
+          </p>
+        )}
       </details>
     </section>
   );

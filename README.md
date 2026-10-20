@@ -224,6 +224,32 @@ pnpm --dir apps/web lint
 GitHub Actions ejecuta estas comprobaciones y la compilación web en cada push y PR.
 Las pruebas de red son opcionales y están desactivadas por defecto.
 
+### Tiempos de procesamiento
+
+En «Detalles de transcripción» se muestran los segundos de descarga o preparación
+del archivo, espera en cola, carga del modelo, análisis y transcripción. Se guardan
+también en el JSON exportado y en el registro del servidor. Los resultados antiguos
+siguen funcionando, pero no tienen mediciones. Un resultado reutilizado conserva
+los tiempos de su procesamiento original, no mide el acceso a la caché.
+
+`audio_analysis` mide la llamada inicial al motor. `transcription` mide el consumo
+de sus segmentos, incluida cualquier decodificación diferida por el motor.
+`processing_total` va desde el inicio del procesamiento hasta antes de escribir el
+JSON y el historial. No incluye la subida inicial ni la limpieza final.
+
+La preparación de archivos admite cancelación y tiene un máximo de 600 segundos,
+ajustable con `AUDIO_PREPARATION_TIMEOUT_SECONDS`. Se mantiene la normalización a
+WAV mono de 16 kHz para preservar la compatibilidad con formatos de entrada.
+
+Para comparar una primera ejecución con el modelo residente en memoria:
+
+```powershell
+uv run --project backend python scripts/benchmark.py "C:\ruta\audio.wav" --runs 2
+```
+
+El benchmark no añade entradas al historial personal y borra sus propios archivos
+de salida al acabar. Usa la configuración y los modelos locales de la aplicación.
+
 La documentación técnica adicional está en [docs/DEV_GUIDE.md](docs/DEV_GUIDE.md).
 
 ## Tecnologías y licencias

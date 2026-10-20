@@ -1,10 +1,12 @@
-import json
 import shutil
 import subprocess
+import tempfile
+import threading
+import time
 from pathlib import Path
 
 from backend.config import REPO_ROOT
-from backend.core.errors import AudioExtractionError
+from backend.core.errors import AudioExtractionError, JobCancelledError
 
 
 def find_ffmpeg() -> str | None:
@@ -19,51 +21,51 @@ def find_ffmpeg() -> str | None:
 
 
 def check_ffmpeg_available() -> bool:
-    return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+    return find_ffmpeg() is not None
 
 
-def probe_duration(path: Path) -> float:
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "json",
-            str(path),
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise AudioExtractionError(f"No se pudo analizar el archivo con ffprobe: {result.stderr.strip()[-500:]}")
-    data = json.loads(result.stdout)
-    return float(data["format"]["duration"])
-
-
-def normalize_to_wav16k_mono(input_path: Path, output_path: Path) -> Path:
+def normalize_to_wav16k_mono(
+    input_path: Path, output_path: Path,
+    cancel_event: threading.Event | None = None, *, timeout: float = 600,
+) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     ffmpeg = find_ffmpeg()
     if ffmpeg is None:
         raise AudioExtractionError("No se encontró FFmpeg para preparar el archivo subido")
-    result = subprocess.run(
-        [
-            ffmpeg,
-            "-y",
-            "-i",
-            str(input_path),
-            "-ac",
-            "1",
-            "-ar",
-            "16000",
-            "-vn",
-            str(output_path),
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0 or not output_path.exists():
-        raise AudioExtractionError(f"No se pudo preparar el audio: {result.stderr.strip()[-500:]}")
+    if cancel_event is not None and cancel_event.is_set():
+        raise JobCancelledError()
+    # A file, rather than an undrained PIPE, prevents stderr from blocking FFmpeg.
+    with tempfile.TemporaryFile() as errors, subprocess.Popen(
+        [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i",
+         str(input_path), "-ac", "1", "-ar", "16000", "-vn", str(output_path)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=errors,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    ) as process:
+        deadline = time.monotonic() + timeout
+        succeeded = False
+        try:
+            while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise JobCancelledError()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise AudioExtractionError("La preparación del audio superó el tiempo máximo")
+                try:
+                    process.wait(timeout=min(0.2, remaining))
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+            if cancel_event is not None and cancel_event.is_set():
+                raise JobCancelledError()
+            if process.returncode != 0 or not output_path.exists():
+                errors.seek(max(0, errors.seek(0, 2) - 2000))
+                detail = errors.read().decode("utf-8", errors="replace").strip()[-500:]
+                raise AudioExtractionError(f"No se pudo preparar el audio: {detail}")
+            succeeded = True
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            if not succeeded:
+                output_path.unlink(missing_ok=True)
     return output_path

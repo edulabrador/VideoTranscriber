@@ -27,7 +27,7 @@ from backend.core.model_manager import (
     get_gpu_memory_mb,
     resolve_batch_size,
     resolve_compute_type,
-    select_device_and_compute_type,
+    select_device,
 )
 from backend.core.pipeline import FileSource, Source, URLSource, run_pipeline
 from backend.core.transcriber import TranscriptionProfile
@@ -210,6 +210,7 @@ async def get_job_result(job_id: str) -> TranscriptResultSchema:
         audio_language=result.audio_language,
         audio_format_id=result.audio_format_id,
         audio_selection=result.audio_selection,
+        timings=result.timings,
     )
 
 
@@ -242,7 +243,7 @@ async def delete_history_item(item_id: str, delete_files: bool = False) -> None:
 
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
-    device, _ = select_device_and_compute_type(settings.device)
+    device = select_device(settings.device)
     compute_type = resolve_compute_type(settings.compute_type, device)
     return HealthResponse(
         status="ok",

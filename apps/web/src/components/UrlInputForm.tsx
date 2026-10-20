@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 
 import { postJson } from "../api/client";
+import { isTerminalStatus } from "../api/types";
 import { useJobContext } from "../context/JobContext";
 import { isInstagramUrl } from "../lib/validateInstagramUrl";
 import type {
@@ -24,10 +25,7 @@ export function UrlInputForm({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [force, setForce] = useState(false);
-  const jobActive = Boolean(
-    state.status &&
-    !["completed", "failed", "cancelled"].includes(state.status),
-  );
+  const jobActive = Boolean(state.status && !isTerminalStatus(state.status));
 
   const handlePaste = async () => {
     try {
