@@ -69,6 +69,7 @@ fi
 
 echo ""
 echo "-- Installing Cobalt dependencies --"
+node scripts/apply-cobalt-security.mjs
 pnpm --dir services/cobalt install --frozen-lockfile
 
 mkdir -p models output temp
