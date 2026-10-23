@@ -1,0 +1,9 @@
+{
+  "isolated-vm": "6.1.2",
+  "ffmpeg-static": "5.3.0",
+  "freebind": "0.2.3",
+  "syscall-napi": "0.0.6",
+  "cookie@0.6": "^0.7.0",
+  "esbuild@0.27": "^0.28.1",
+  "js-yaml@3": "^3.15.2"
+}

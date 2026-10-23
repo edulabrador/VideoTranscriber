@@ -261,3 +261,9 @@ La documentación técnica adicional está en [docs/DEV_GUIDE.md](docs/DEV_GUIDE
 - [PyAV](https://github.com/PyAV-Org/PyAV), lectura de audio y vídeo.
 
 El código propio de VideoTranscriber utiliza la licencia [MIT](LICENSE).
+
+## Dependencias revisadas de Cobalt
+
+Usa Node 20.19 o posterior y pnpm 11.25.0. Los instaladores aplican `scripts/cobalt-security.patch` sobre el commit fijado, sin descargar una rama cambiante. El parche solo actualiza el bloqueo y la configuración de dependencias; conserva las versiones nativas existentes. Si hay cambios locales incompatibles, el proceso se detiene antes de sobrescribirlos.
+
+En una instalación existente, con los procesos parados y tras actualizar el código, ejecuta en este orden `pnpm install --frozen-lockfile`, `node scripts/apply-cobalt-security.mjs`, `pnpm --dir services/cobalt install --frozen-lockfile` y `uv sync --project backend --locked`. Después puedes reiniciar la aplicación. No se cambian credenciales ni datos operativos. El aviso sin parche publicado de `braces` continúa registrado.

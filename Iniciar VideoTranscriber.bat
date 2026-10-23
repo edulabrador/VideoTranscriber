@@ -41,6 +41,8 @@ if not exist "services\cobalt\api\package.json" (
 )
 for /f %%C in ('git -C services\cobalt rev-parse HEAD') do set "COBALT_INSTALLED=%%C"
 if not "%COBALT_INSTALLED%"=="%COBALT_REF%" goto cobalt_version_error
+node scripts\apply-cobalt-security.mjs
+if errorlevel 1 goto startup_error
 
 if not exist "services\cobalt\api\.env" (
   >"services\cobalt\api\.env" echo API_URL=http://localhost:9187/

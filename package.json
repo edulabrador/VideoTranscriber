@@ -1,7 +1,7 @@
 {
   "name": "video-transcriber",
   "private": true,
-  "packageManager": "pnpm@9.6.0",
+  "packageManager": "pnpm@11.25.0",
   "scripts": {
     "dev": "concurrently -n web,api,cobalt -c blue,green,magenta \"pnpm --dir apps/web run dev\" \"uv run --project backend python -m uvicorn backend.api.app:app --port 8187\" \"pnpm --dir services/cobalt/api run start\"",
     "build": "pnpm --dir apps/web run build",
@@ -9,6 +9,10 @@
     "lint": "pnpm --dir apps/web run lint"
   },
   "devDependencies": {
-    "concurrently": "^9.0.0"
+    "concurrently": "^9.2.5"
+  },
+  "engines": {
+    "node": ">=20.19.0",
+    "pnpm": ">=11.25.0"
   }
 }
