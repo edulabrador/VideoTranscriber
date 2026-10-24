@@ -56,7 +56,7 @@ def client(tmp_path, monkeypatch, store):
     monkeypatch.setattr(routes, "history_store", store)
     monkeypatch.setattr(routes, "job_manager", JobManager())
     monkeypatch.setattr(routes, "_run_job", Mock())
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
         yield client
 
 

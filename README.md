@@ -269,3 +269,8 @@ Usa Node 20.19 o posterior y pnpm 11.25.0. Los instaladores aplican `scripts/cob
 En una instalación existente, con los procesos parados y tras actualizar el código, ejecuta en este orden `pnpm install --frozen-lockfile`, `node scripts/apply-cobalt-security.mjs`, `pnpm --dir services/cobalt install --frozen-lockfile` y `uv sync --project backend --locked`. Después puedes reiniciar la aplicación. No se cambian credenciales ni datos operativos.
 
 El [aviso de `braces`](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) fue retirado el 23/10/2026 porque no se considera explotable en la práctica. Ya no se registra como vulnerabilidad pendiente.
+
+
+### Acceso a los datos
+
+El backend mantiene el acceso de propietario en loopback. Comprueba la dirección del cliente, Host y Origin, y rechaza los encabezados de reenvío detectables. La interfaz y las llamadas locales habituales conservan su funcionamiento. Las peticiones remotas directas al historial, las transcripciones o las descargas se rechazan. Un túnel TCP que oculte el origen puede parecer un cliente local. Para compartir una instancia debe diseñarse una capa de autenticación explícita; no se debe ocultar el origen remoto detrás de un proxy local.
