@@ -37,6 +37,10 @@ packages = ["backend"]
 line-length = 100
 target-version = "py311"
 
+[tool.uv]
+# Keep transitive cache-lock and legacy wheel tooling above their security fixes.
+constraint-dependencies = ["filelock>=4.2.1", "setuptools>=84.1.0"]
+
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
