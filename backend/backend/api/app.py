@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.api.local_access import LocalDataAccess
 from backend.api.routes import router
 from backend.config import settings
 from backend.core.audio import check_ffmpeg_available
@@ -31,5 +32,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(LocalDataAccess)
 
 app.include_router(router)
