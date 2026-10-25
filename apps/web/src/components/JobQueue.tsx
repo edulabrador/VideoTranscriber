@@ -34,14 +34,22 @@ export function JobQueue({ revision }: { revision: number }) {
     const controller = new AbortController();
     const poll = async () => {
       try {
-        const items = await getJson<JobStatusResponse[]>("/api/jobs", controller.signal);
+        const items = await getJson<JobStatusResponse[]>(
+          "/api/jobs",
+          controller.signal,
+        );
         if (cancelled) return;
         setJobs(items);
         // Background jobs finish off screen; tell the library to reload.
         const done = new Set(
-          items.filter((job) => isTerminalStatus(job.status)).map((job) => job.id),
+          items
+            .filter((job) => isTerminalStatus(job.status))
+            .map((job) => job.id),
         );
-        if (finished.current && [...done].some((id) => !finished.current?.has(id))) {
+        if (
+          finished.current &&
+          [...done].some((id) => !finished.current?.has(id))
+        ) {
           window.dispatchEvent(new Event(HISTORY_CHANGED_EVENT));
         }
         finished.current = done;

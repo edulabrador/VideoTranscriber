@@ -27,9 +27,15 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function fetchApi(path: string, init?: RequestInit): Promise<Response> {
+async function fetchApi(
+  path: string,
+  init?: RequestInit,
+  timeoutMs?: number,
+): Promise<Response> {
   try {
-    const timeout = AbortSignal.timeout(init?.body instanceof FormData ? 300_000 : 15_000);
+    const timeout = AbortSignal.timeout(
+      timeoutMs ?? (init?.body instanceof FormData ? 300_000 : 15_000),
+    );
     const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
     return await fetch(`${BASE_URL}${path}`, { ...init, signal });
   } catch {
@@ -48,6 +54,21 @@ export async function postJson<T>(path: string, body: unknown): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  return handleResponse<T>(res);
+}
+
+export async function patchJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetchApi(path, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handleResponse<T>(res);
+}
+
+export async function postLong<T>(path: string): Promise<T> {
+  // Local summaries can take minutes on a CPU, longer than the default timeout.
+  const res = await fetchApi(path, { method: "POST" }, 900_000);
   return handleResponse<T>(res);
 }
 

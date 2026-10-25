@@ -36,6 +36,19 @@ class CreateJobFromUrlRequest(TranscriptionOptionsSchema):
     force: bool = False
 
 
+class SegmentEdit(BaseModel):
+    index: int = Field(ge=0)
+    text: str = Field(max_length=5000)
+
+
+SpeakerName = Annotated[str, Field(min_length=1, max_length=60, pattern=r"^[^\r\n<>]+$")]
+
+
+class TranscriptEditRequest(BaseModel):
+    segments: list[SegmentEdit] = Field(default_factory=list, max_length=20000)
+    speakers: dict[str, SpeakerName] = Field(default_factory=dict, max_length=50)
+
+
 class JobResponse(BaseModel):
     id: str
     status: JobStatus
@@ -94,6 +107,9 @@ class TranscriptResultSchema(BaseModel):
     diarize: bool = False
     num_speakers: int | None = None
     source: str = ""
+    edited: bool = False
+    has_audio: bool = False
+    summary: str | None = None
 
 
 class HistoryItemSchema(BaseModel):
@@ -108,6 +124,15 @@ class HistoryItemSchema(BaseModel):
     text: str | None = None
     status: Literal["completed", "failed"] = "completed"
     error: str | None = None
+
+
+class SummaryStatusResponse(BaseModel):
+    available: bool
+    model: str | None = None
+
+
+class SummaryResponse(BaseModel):
+    markdown: str
 
 
 class HealthResponse(BaseModel):

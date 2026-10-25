@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from backend.config import settings
-from backend.core.exporter import PROCESSING_VERSION, read_json, result_from_payload
+from backend.core.exporter import PROCESSING_VERSION, read_json, result_from_payload, write_all
 from backend.core.model_manager import select_device
 from backend.core.transcriber import (
     TranscriptionOptions,
@@ -96,9 +96,10 @@ class HistoryItem:
 
 
 class HistoryStore:
-    def __init__(self, path: Path, max_entries: int, output_dir: Path):
+    def __init__(self, path: Path, max_entries: int, output_dir: Path, max_failed: int = 20):
         self._path = path
         self._max_entries = max_entries
+        self._max_failed = max_failed
         self._output_dir = output_dir
         self._lock = threading.Lock()
 
@@ -148,12 +149,30 @@ class HistoryStore:
                 return None
 
     def add_entry(self, item: HistoryItem) -> None:
+        source_key = _source_key(item.source)
         with self._lock:
             entries = [entry for entry in self._read() if entry.get("id") != item.id]
+            if item.status == "completed":
+                # A success supersedes earlier failures of the same source.
+                entries = [
+                    entry for entry in entries
+                    if entry.get("status", "completed") == "completed"
+                    or _source_key(entry.get("source", "")) != source_key
+                ]
             entries.insert(0, asdict(item))
-            kept, dropped = entries[: self._max_entries], entries[self._max_entries:]
+            kept: list[dict] = []
+            dropped: list[dict] = []
+            completed = failed = 0
+            for entry in entries:
+                if entry.get("status", "completed") == "completed":
+                    completed += 1
+                    (kept if completed <= self._max_entries else dropped).append(entry)
+                else:
+                    failed += 1
+                    if failed <= self._max_failed:
+                        kept.append(entry)
             self._write(kept)
-        # Entries pushed out of the history can no longer be opened; free their files.
+        # Transcripts pushed out of the history can no longer be opened; free their files.
         for entry in dropped:
             self._remove_files(str(entry.get("id", "")))
 
@@ -246,6 +265,47 @@ class HistoryStore:
                 continue
         return None
 
+    def update_transcript(
+        self,
+        item_id: str,
+        segment_texts: dict[int, str] | None = None,
+        speaker_names: dict[str, str] | None = None,
+    ) -> TranscriptionResult | None:
+        """Apply hand corrections and rewrite every export. None if the item is unknown."""
+        with self._lock:
+            entries = self._read()
+            entry = next(
+                (e for e in entries if e.get("id") == item_id
+                 and e.get("status", "completed") == "completed"),
+                None,
+            )
+            path = self._job_dir(item_id)
+            if entry is None or path is None:
+                return None
+            payload = json.loads((path / "transcript.json").read_text(encoding="utf-8"))
+            result = result_from_payload(payload)
+            for index, text in (segment_texts or {}).items():
+                if not 0 <= index < len(result.segments):
+                    raise ValueError(f"No existe el fragmento {index}")
+                result.segments[index].text = text.strip()
+                result.segments[index].words = []  # Old word timings no longer match.
+            for segment in result.segments:
+                if segment.speaker and segment.speaker in (speaker_names or {}):
+                    segment.speaker = (speaker_names or {})[segment.speaker].strip()
+            result.text = " ".join(s.text for s in result.segments if s.text).strip()
+            result.edited = True
+            write_all(
+                result,
+                path,
+                source=payload.get("source", entry.get("source", "")),
+                title=payload.get("title", entry.get("title", "")),
+                created_at=payload.get("created_at", entry.get("created_at", "")),
+                audio_quality=payload.get("audio_quality", "best"),
+            )
+            entry["word_count"] = result.word_count
+            self._write(entries)
+            return result
+
     def delete_entry(self, item_id: str, delete_files: bool = False) -> bool:
         with self._lock:
             entries = self._read()
@@ -270,4 +330,5 @@ history_store = HistoryStore(
     settings.history_file,
     settings.max_history_entries,
     settings.output_dir,
+    settings.max_failed_entries,
 )

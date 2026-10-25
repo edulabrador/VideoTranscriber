@@ -1,0 +1,13 @@
+# YouTube changes often and old yt-dlp releases stop working, so check for a new
+# one every week. Dependabot opens a pull request that CI tests before merging.
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+    allow:
+      - dependency-name: "yt-dlp"
+      - dependency-name: "yt-dlp-ejs"
+    commit-message:
+      prefix: "deps"

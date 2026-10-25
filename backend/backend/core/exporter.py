@@ -237,6 +237,7 @@ def write_json(
         "audio_quality": audio_quality,
         "timings": result.timings,
         **result.options.cache_fields(),
+        "edited": result.edited,
         "text": result.text,
         "segments": [asdict(seg) for seg in result.segments],
     }
@@ -278,6 +279,7 @@ def result_from_payload(payload: dict) -> TranscriptionResult:
         audio_selection=payload.get("audio_selection"),
         timings=payload.get("timings", {}),
         source=payload.get("source", ""),
+        edited=payload.get("edited", False),
         options=TranscriptionOptions(
             language=payload.get("requested_language"),
             task=payload.get("task", "transcribe"),

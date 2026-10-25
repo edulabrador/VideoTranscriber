@@ -11,6 +11,7 @@ from backend.core.errors import JobCancelledError, TranscriptionError
 from backend.core.model_manager import (
     get_model,
     is_model_cached,
+    report_download_progress,
     resolve_batch_size,
     resolve_compute_type,
     resolve_model_size,
@@ -79,10 +80,17 @@ class TranscriptionResult:
     timings: dict[str, float] = field(default_factory=dict)
     options: TranscriptionOptions = field(default_factory=TranscriptionOptions)
     source: str = ""  # Link or file name, filled in by the pipeline.
+    edited: bool = False  # Text or speaker names were corrected by hand.
 
     @property
     def word_count(self) -> int:
         return len(self.text.split())
+
+
+def _megabytes(size: int) -> str:
+    if size >= 1024**3:
+        return f"{size / 1024**3:.1f} GB".replace(".", ",")
+    return f"{round(size / 1024**2)} MB"
 
 
 def resolve_profile_settings(
@@ -138,14 +146,33 @@ def transcribe_audio(
     try:
         if cancel_event.is_set():
             raise JobCancelledError()
+        cached = is_model_cached(model_size)
         if on_status:
             message = (
                 f"Cargando el modelo {model_size}..."
-                if is_model_cached(model_size)
+                if cached
                 else f"Descargando y cargando el modelo {model_size}. La primera vez puede tardar varios minutos."
             )
             on_status("loading_model", message)
-        model = get_model(model_size, device, compute_type)
+        if cached or on_status is None:
+            model = get_model(model_size, device, compute_type)
+        else:
+            status = on_status
+
+            def report(done: int, total: int | None) -> None:
+                if total:
+                    percent = min(99, round(done * 100 / total))
+                    status("loading_model", (
+                        f"Descargando el modelo {model_size}: {_megabytes(done)} de "
+                        f"{_megabytes(total)} ({percent} %). Solo la primera vez."
+                    ))
+                elif done:
+                    status("loading_model", (
+                        f"Descargando el modelo {model_size}: {_megabytes(done)}. Solo la primera vez."
+                    ))
+
+            with report_download_progress(model_size, report):
+                model = get_model(model_size, device, compute_type)
         model_loading_seconds = time.perf_counter() - load_started
     except JobCancelledError:
         raise

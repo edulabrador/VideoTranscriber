@@ -16,6 +16,7 @@ backend/backend/
     model_manager.py          hardware detection + ModelCache (parks models in RAM)
     transcriber.py            faster-whisper wrapper
     diarizer.py               speaker diarization (sherpa-onnx) + speaker assignment
+    summarizer.py             optional summaries through a local Ollama server
     exporter.py                txt/md/srt/vtt/json writers (single source of formatting)
     history.py                 recent-history JSON store
     job_manager.py             in-memory job registry + cancellation
@@ -92,6 +93,25 @@ word timestamps it labels each word and splits segments where the speaker change
 The pipeline runs it inside the transcription turn, after Whisper, as the
 `diarizing` stage. Set `VIDEO_TRANSCRIBER_LIVE_TEST=1` to run the test that
 downloads the models and a real four-speaker recording.
+
+## Editing, playback and summaries
+
+`PATCH /api/jobs/{id}/transcript` applies text corrections and speaker names through
+`HistoryStore.update_transcript`, which rewrites every export with `write_all`, so the
+files on disk never disagree with what the UI shows. The pipeline keeps `audio.m4a`
+(mono AAC, ~20 MB/h) unless `KEEP_AUDIO=false`; `GET /api/jobs/{id}/audio` serves it
+with Range support. `summarizer.py` talks to Ollama over its HTTP API and splits long
+transcripts into chunks of `CHUNK_CHARS`; the UI renders its Markdown with React
+elements only (`MarkdownText.tsx`), never as HTML.
+
+## Browser and model tests
+
+`pnpm --dir apps/web e2e` starts `scripts/e2e_server.py` (the real API with Whisper,
+diarization and Ollama simulated) and `vite preview`, then drives Chromium through
+upload, speakers, playback, search, editing, summary and the phone layout. Set
+`PLAYWRIGHT_CHROMIUM` to use a browser binary other than Playwright's, and
+`E2E_SCREENSHOTS=<dir>` to save screenshots. `VIDEO_TRANSCRIBER_MODEL_TEST=1` enables
+the tests that download Whisper tiny and the diarization models.
 
 ## Lint / typecheck
 

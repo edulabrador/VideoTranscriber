@@ -39,7 +39,15 @@ ejecuta localmente. No necesita claves de API ni una suscripción.
   legibles (máximo dos líneas de 42 caracteres y 6 segundos) y JSON.
 - En vídeos de YouTube, cada marca de tiempo abre el vídeo en ese momento.
 - Los trabajos fallidos quedan en el historial con su error y se pueden reintentar.
-- Historial local. Las dos últimas entradas permiten desplegar el texto completo.
+- Historial local de hasta 1.000 transcripciones. Los trabajos fallidos se guardan
+  aparte y nunca desplazan a las transcripciones.
+- Reproductor de audio junto al texto: cada marca de tiempo lleva a ese momento y la
+  frase que suena se resalta.
+- Corrección del texto y de los nombres de los hablantes desde la interfaz. Al
+  guardar se regeneran todas las exportaciones.
+- Búsqueda dentro de la transcripción abierta, con resaltado y recuento.
+- Resumen, puntos clave y capítulos con un modelo local de
+  [Ollama](https://ollama.com), si está instalado. Ver más abajo.
 - Búsqueda en todos los textos del historial y apertura de resultados antiguos.
 - Recuperación del último trabajo al recargar la página y avisos de desconexión.
 - Opción para volver a transcribir sin reutilizar el resultado guardado.
@@ -143,6 +151,11 @@ La configuración local está en `.env`. Este archivo nunca se sube a GitHub.
 | `BEAM_SIZE` | `1` | Prioriza velocidad. `5` puede mejorar precisión y tarda más |
 | `MAX_CACHED_MODELS` | `2` | Modelos que se conservan entre trabajos. En CUDA solo el activo ocupa VRAM |
 | `MODEL_IDLE_UNLOAD_SECONDS` | `900` | Libera los modelos tras ese tiempo sin uso. `0` los mantiene |
+| `MAX_HISTORY_ENTRIES` | `1000` | Transcripciones guardadas. Al superarlo se borra la más antigua y sus archivos |
+| `MAX_FAILED_ENTRIES` | `20` | Trabajos fallidos que se recuerdan, aparte del límite anterior |
+| `KEEP_AUDIO` | `true` | Guarda una copia ligera del audio (unos 20 MB por hora) para escucharla |
+| `OLLAMA_URL` | `http://127.0.0.1:11434` | Servidor local de Ollama para los resúmenes. Vacío oculta la función |
+| `OLLAMA_MODEL` | vacío | Modelo de Ollama. Vacío usa el primero instalado |
 | `DIARIZATION_THRESHOLD` | `0.5` | Agrupación de voces cuando no se indica el número de hablantes. Más alto, menos hablantes |
 
 La configuración optimizada de este ordenador está guardada únicamente en su `.env`
@@ -188,6 +201,16 @@ Consejos:
   procesador de cuatro núcleos.
 - Las voces que se solapan se asignan a quien más habla en ese tramo.
 
+### Resúmenes con IA local
+
+Si tienes [Ollama](https://ollama.com) en marcha con algún modelo (por ejemplo
+`ollama pull llama3.2`), aparece el botón **Resumir** bajo la transcripción. Genera un
+resumen, los puntos clave y capítulos con marcas de tiempo, y lo guarda como
+`summary.md` junto al resto de exportaciones. Todo ocurre en tu ordenador. Las
+transcripciones largas se resumen por partes y después se combinan. Con un modelo
+pequeño en CPU puede tardar varios minutos. La calidad depende del modelo que elijas
+y, como en cualquier resumen automático, conviene revisarlo.
+
 ### Fiabilidad y recuperación
 
 El progreso distingue consulta del vídeo, descarga del audio, preparación del archivo,
@@ -224,7 +247,8 @@ Estos directorios no se suben a GitHub:
 
 - `models/`: modelos de reconocimiento.
 - `output/`: textos y subtítulos generados.
-- `temp/`: audio temporal.
+- `temp/`: audio temporal. Lo que quede de un cierre a mitad de trabajo se borra al
+  arrancar.
 - `backend/data/`: historial.
 - `.env`: configuración privada.
 
@@ -263,10 +287,22 @@ uv run --project backend --extra dev pytest backend/tests -q
 uv run --project backend --extra dev mypy --config-file backend/pyproject.toml backend/backend
 pnpm --dir apps/web test
 pnpm --dir apps/web lint
+pnpm --dir apps/web e2e   # tras compilar; necesita FFmpeg y Chromium de Playwright
 ```
 
-GitHub Actions ejecuta estas comprobaciones y la compilación web en cada push y PR.
-Las pruebas de red son opcionales y están desactivadas por defecto.
+GitHub Actions ejecuta estas comprobaciones y la compilación web en cada push y PR,
+además de dos trabajos más lentos:
+
+- **models**: transcribe una grabación real con el modelo `tiny` de Whisper e
+  identifica sus hablantes con los modelos reales. Detecta roturas al actualizar
+  faster-whisper, CTranslate2 o sherpa-onnx. En local se activa con
+  `VIDEO_TRANSCRIBER_MODEL_TEST=1`.
+- **e2e**: la interfaz compilada maneja la API real en Chromium, con los modelos
+  simulados por `scripts/e2e_server.py`.
+
+Dependabot propone cada semana la última versión de yt-dlp, que YouTube obliga a
+actualizar a menudo. Las pruebas de red contra YouTube siguen siendo opcionales
+(`VIDEO_TRANSCRIBER_LIVE_TEST=1`).
 
 ### Tiempos de procesamiento
 

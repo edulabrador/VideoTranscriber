@@ -17,7 +17,13 @@ class Settings(BaseSettings):
     cookies_file: Path | None = None
     cobalt_api_url: str | None = "http://127.0.0.1:9187"
 
-    @field_validator("cookies_file", "cobalt_api_url", mode="before")
+    # Optional local summaries. Leave OLLAMA_URL empty to hide the feature.
+    ollama_url: str | None = "http://127.0.0.1:11434"
+    ollama_model: str | None = None  # None uses the first model installed in Ollama.
+    ollama_timeout_seconds: float = Field(default=600, gt=0)
+    summary_language: str = "español"
+
+    @field_validator("cookies_file", "cobalt_api_url", "ollama_url", "ollama_model", mode="before")
     @classmethod
     def empty_optional_setting_is_none(cls, value):
         return None if value == "" else value
@@ -29,7 +35,10 @@ class Settings(BaseSettings):
     beam_size: int = 1
 
     cors_origins: list[str] = ["http://127.0.0.1:5187"]
-    max_history_entries: int = 50
+    # Each entry is a few hundred bytes; past this many, the oldest transcripts are deleted.
+    max_history_entries: int = Field(default=1000, ge=1)
+    # Failed jobs are kept apart so they never push real transcripts out.
+    max_failed_entries: int = Field(default=20, ge=0)
     max_upload_bytes: int = Field(default=512 * 1024 * 1024, gt=0)
     audio_preparation_timeout_seconds: float = Field(default=600, gt=0)
     # Models kept between jobs. On CUDA only the active one uses VRAM; the rest wait in RAM.
@@ -38,6 +47,8 @@ class Settings(BaseSettings):
     model_idle_unload_seconds: float = Field(default=900, ge=0)
     # Speaker clustering when the number of speakers is not given. Higher merges more
     # voices into one speaker; lower splits them into more.
+    # Keep a small audio copy (about 20 MB per hour) to play it next to the transcript.
+    keep_audio: bool = True
     diarization_threshold: float = Field(default=0.5, gt=0, lt=2)
 
     def ensure_dirs(self) -> None:

@@ -20,7 +20,7 @@ jobs:
           python-version: "3.12"
       - run: uv sync --project backend --locked --extra dev
       - run: uv run --project backend --extra dev pytest backend/tests -q
-      - run: uv run --project backend --extra dev ruff check backend/backend backend/tests scripts/benchmark.py
+      - run: uv run --project backend --extra dev ruff check backend/backend backend/tests scripts/benchmark.py scripts/e2e_server.py
       - run: uv run --project backend --extra dev mypy --config-file backend/pyproject.toml backend/backend
   frontend:
     runs-on: ubuntu-latest
@@ -35,3 +35,36 @@ jobs:
       - run: pnpm --dir apps/web test
       - run: pnpm --dir apps/web lint
       - run: pnpm --dir apps/web build
+  models:
+    # Real Whisper "tiny" and diarization models on a real recording.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --project backend --locked --extra dev
+      - run: uv run --project backend --extra dev pytest backend/tests/test_real_models.py backend/tests/test_diarization.py -q -rs
+        env:
+          VIDEO_TRANSCRIBER_MODEL_TEST: "1"
+  e2e:
+    # The built web app driving the real API (models simulated) in Chromium.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: uv sync --project backend --locked
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir apps/web exec playwright install --with-deps chromium
+      - run: pnpm --dir apps/web build
+      - run: pnpm --dir apps/web e2e

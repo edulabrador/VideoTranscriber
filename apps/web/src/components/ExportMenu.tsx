@@ -10,10 +10,22 @@ const FORMATS: { fmt: ExportFormat; label: string }[] = [
   { fmt: "json", label: "Descargar JSON" },
 ];
 
-export function ExportMenu({ jobId }: { jobId: string }) {
+export function ExportMenu({
+  jobId,
+  hasSummary = false,
+}: {
+  jobId: string;
+  hasSummary?: boolean;
+}) {
+  const formats = hasSummary
+    ? [
+        ...FORMATS,
+        { fmt: "summary" as ExportFormat, label: "Descargar el resumen" },
+      ]
+    : FORMATS;
   return (
     <div className="export-actions" aria-label="Descargar transcripción">
-      {FORMATS.map(({ fmt, label }) => (
+      {formats.map(({ fmt, label }) => (
         <a
           key={fmt}
           href={downloadFileUrl(`/api/jobs/${jobId}/download/${fmt}`)}
@@ -23,7 +35,7 @@ export function ExportMenu({ jobId }: { jobId: string }) {
           title={label}
         >
           <Icon name="download" size={13} />
-          {fmt.toUpperCase()}
+          {fmt === "summary" ? "RESUMEN" : fmt.toUpperCase()}
         </a>
       ))}
     </div>

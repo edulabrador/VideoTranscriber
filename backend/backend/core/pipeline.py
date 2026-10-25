@@ -11,9 +11,9 @@ from pathlib import Path
 
 from backend.config import settings
 from backend.core import diarizer, downloader, validators
-from backend.core.audio import normalize_to_wav16k_mono
+from backend.core.audio import make_listening_copy, normalize_to_wav16k_mono
 from backend.core.downloader import AudioQuality
-from backend.core.errors import JobCancelledError, TranscriberError
+from backend.core.errors import AudioExtractionError, JobCancelledError, TranscriberError
 from backend.core.exporter import write_all
 from backend.core.history import HistoryItem, history_store
 from backend.core.job_manager import JobStatus
@@ -26,6 +26,7 @@ from backend.core.transcriber import (
 )
 
 StageCallback = Callable[[JobStatus, str, int | None], None]
+LISTENING_COPY = "audio.m4a"
 logger = logging.getLogger(__name__)
 
 
@@ -81,6 +82,7 @@ class TranscriptionTurns:
 
 
 _TURNS = TranscriptionTurns()
+_DIARIZATION_TURNS = TranscriptionTurns()
 
 
 def release_idle_models() -> bool:
@@ -234,7 +236,26 @@ def run_pipeline(
                 result.audio_language = download_result.audio_language
                 result.audio_format_id = download_result.audio_format_id
                 result.audio_selection = download_result.audio_selection
-            if options.diarize and result.segments:
+        finally:
+            model_cache.touch()
+            _TURNS.release()
+
+        if options.diarize and result.segments:
+            # Speaker identification runs on the CPU. After a GPU transcription it takes its
+            # own turn, leaving the GPU free for the next job; after a CPU transcription it
+            # shares the transcription slot so both never compete for the same cores.
+            diarization_turns = _DIARIZATION_TURNS if result.device == "cuda" else _TURNS
+
+            def report_diarization_position(ahead: int) -> None:
+                if ahead:
+                    on_stage(
+                        "diarizing",
+                        "Transcripción lista. Esperando para identificar hablantes...",
+                        transcription_end,
+                    )
+
+            diarization_turns.acquire(cancel_event, report_diarization_position)
+            try:
                 diarization_started = time.perf_counter()
                 on_stage(
                     "diarizing",
@@ -253,9 +274,21 @@ def run_pipeline(
                 )
                 result.segments = diarizer.assign_speakers(result.segments, turns)
                 result.timings["diarization"] = time.perf_counter() - diarization_started
-        finally:
-            model_cache.touch()
-            _TURNS.release()
+            finally:
+                diarization_turns.release()
+
+        if settings.keep_audio:
+            on_stage("exporting", "Guardando el audio para poder escucharlo...", 99)
+            copy_started = time.perf_counter()
+            try:
+                make_listening_copy(
+                    raw_audio_path, output_dir / LISTENING_COPY, cancel_event,
+                    timeout=settings.audio_preparation_timeout_seconds,
+                )
+                result.timings["audio_copy"] = time.perf_counter() - copy_started
+            except AudioExtractionError as exc:
+                # Playback is a convenience; the transcript is still complete without it.
+                logger.warning("No se pudo guardar el audio de %s: %s", job_id, exc.message)
 
         on_stage("exporting", "Preparando los archivos...", 99)
         result.timings.update(timings)
