@@ -59,9 +59,10 @@ _BACKGROUND_TASKS: set[asyncio.Task] = set()
 
 
 def _start_background(job_id: str, source: Source, profile: TranscriptionProfile,
-                      audio_quality: AudioQuality, options: TranscriptionOptions) -> None:
+                      audio_quality: AudioQuality, options: TranscriptionOptions,
+                      replaces: str | None = None) -> None:
     task = asyncio.create_task(
-        asyncio.to_thread(_run_job, job_id, source, profile, audio_quality, options)
+        asyncio.to_thread(_run_job, job_id, source, profile, audio_quality, options, replaces)
     )
     _BACKGROUND_TASKS.add(task)
     task.add_done_callback(_BACKGROUND_TASKS.discard)
@@ -91,6 +92,7 @@ def _run_job(
     profile: TranscriptionProfile,
     audio_quality: AudioQuality = "balanced",
     options: TranscriptionOptions | None = None,
+    replaces: str | None = None,
 ) -> None:
     job = job_manager.get_job(job_id)
     if job is None:
@@ -110,6 +112,13 @@ def _run_job(
             options=options,
         )
         job_manager.set_result(job_id, result)
+        if replaces and replaces != job_id:
+            # "Volver a transcribir" replaces the earlier result instead of duplicating it.
+            try:
+                if history_store.delete_entry(replaces, delete_files=True):
+                    job_manager.remove_job(replaces)
+            except OSError:
+                pass
     except TranscriberError as exc:
         status: JobStatus = "cancelled" if exc.code == "cancelled" else "failed"
         job_manager.set_error(job_id, exc.code, exc.message, status=status)
@@ -136,10 +145,11 @@ async def create_job_from_url(payload: CreateJobFromUrlRequest) -> JobResponse:
         ) from exc
 
     options = payload.to_options()
-    cached = None if payload.force else history_store.find_cached(
+    cached = history_store.find_cached(
         payload.url, payload.profile, payload.audio_quality, options
     )
-    if cached:
+    replaces = cached[0] if cached and payload.force else None
+    if cached and not payload.force:
         cached_id, result = cached
         job = job_manager.create_job(cached_id, source=payload.url)
         job_manager.set_result(cached_id, result, "Resultado reutilizado del historial.")
@@ -153,6 +163,7 @@ async def create_job_from_url(payload: CreateJobFromUrlRequest) -> JobResponse:
     job = job_manager.create_job(source=payload.url, dedup_key=dedup_key)
     _start_background(
         job.id, URLSource(url=payload.url), payload.profile, payload.audio_quality, options,
+        replaces,
     )
     return JobResponse(id=job.id, status=job.status)
 

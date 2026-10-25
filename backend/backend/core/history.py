@@ -96,9 +96,10 @@ class HistoryItem:
 
 
 class HistoryStore:
-    def __init__(self, path: Path, max_entries: int, output_dir: Path):
+    def __init__(self, path: Path, max_entries: int, output_dir: Path, max_failed: int = 20):
         self._path = path
         self._max_entries = max_entries
+        self._max_failed = max_failed
         self._output_dir = output_dir
         self._lock = threading.Lock()
 
@@ -148,12 +149,30 @@ class HistoryStore:
                 return None
 
     def add_entry(self, item: HistoryItem) -> None:
+        source_key = _source_key(item.source)
         with self._lock:
             entries = [entry for entry in self._read() if entry.get("id") != item.id]
+            if item.status == "completed":
+                # A success supersedes earlier failures of the same source.
+                entries = [
+                    entry for entry in entries
+                    if entry.get("status", "completed") == "completed"
+                    or _source_key(entry.get("source", "")) != source_key
+                ]
             entries.insert(0, asdict(item))
-            kept, dropped = entries[: self._max_entries], entries[self._max_entries:]
+            kept: list[dict] = []
+            dropped: list[dict] = []
+            completed = failed = 0
+            for entry in entries:
+                if entry.get("status", "completed") == "completed":
+                    completed += 1
+                    (kept if completed <= self._max_entries else dropped).append(entry)
+                else:
+                    failed += 1
+                    if failed <= self._max_failed:
+                        kept.append(entry)
             self._write(kept)
-        # Entries pushed out of the history can no longer be opened; free their files.
+        # Transcripts pushed out of the history can no longer be opened; free their files.
         for entry in dropped:
             self._remove_files(str(entry.get("id", "")))
 
@@ -270,4 +289,5 @@ history_store = HistoryStore(
     settings.history_file,
     settings.max_history_entries,
     settings.output_dir,
+    settings.max_failed_entries,
 )

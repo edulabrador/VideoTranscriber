@@ -50,17 +50,15 @@ if not exist "services\cobalt\api\.env" (
   >>"services\cobalt\api\.env" echo API_LISTEN_ADDRESS=127.0.0.1
 )
 
-if not exist "backend\.venv\Scripts\python.exe" (
-  echo Instalando el motor de transcripcion...
-  uv sync --project backend --locked
-  if errorlevel 1 goto startup_error
-)
+rem Sync on every start so updates pulled with git also install their new
+rem dependencies. When nothing changed, both commands finish in a moment.
+echo Comprobando el motor de transcripcion...
+uv sync --project backend --locked
+if errorlevel 1 goto startup_error
 
-if not exist "node_modules" (
-  echo Instalando la interfaz...
-  call %PNPM% install --frozen-lockfile
-  if errorlevel 1 goto startup_error
-)
+echo Comprobando la interfaz...
+call %PNPM% install --frozen-lockfile --prefer-offline
+if errorlevel 1 goto startup_error
 
 if not exist "services\cobalt\node_modules" (
   echo Instalando el componente de TikTok...

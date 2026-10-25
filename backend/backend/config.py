@@ -29,7 +29,10 @@ class Settings(BaseSettings):
     beam_size: int = 1
 
     cors_origins: list[str] = ["http://127.0.0.1:5187"]
-    max_history_entries: int = 50
+    # Each entry is a few hundred bytes; past this many, the oldest transcripts are deleted.
+    max_history_entries: int = Field(default=1000, ge=1)
+    # Failed jobs are kept apart so they never push real transcripts out.
+    max_failed_entries: int = Field(default=20, ge=0)
     max_upload_bytes: int = Field(default=512 * 1024 * 1024, gt=0)
     audio_preparation_timeout_seconds: float = Field(default=600, gt=0)
     # Models kept between jobs. On CUDA only the active one uses VRAM; the rest wait in RAM.
