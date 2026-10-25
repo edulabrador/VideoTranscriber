@@ -1,12 +1,16 @@
+import gc
 import logging
 import os
 import subprocess
 import sys
+import threading
+import time
+from collections import OrderedDict
 from functools import lru_cache
 from pathlib import Path
 
 _NVIDIA_DLL_HANDLES: list[object] = []
-if os.name == "nt":
+if sys.platform == "win32":
     nvidia_root = Path(sys.prefix) / "Lib" / "site-packages" / "nvidia"
     dll_dirs = sorted(nvidia_root.glob("*/bin"))
     os.environ["PATH"] = os.pathsep.join([*(str(path) for path in dll_dirs), os.environ["PATH"]])
@@ -101,22 +105,114 @@ def resolve_batch_size(configured: int, device: str, profile: str) -> int:
     return recommended_batch_size(get_gpu_memory_mb(), profile)
 
 
-@lru_cache(maxsize=1)
+class ModelCache:
+    """Keeps recently used Whisper models so switching profiles does not reload from disk.
+
+    On CUDA only the active model stays in VRAM; the others are parked in system
+    RAM with CTranslate2's ``unload_model(to_cpu=True)`` and moved back on demand.
+    """
+
+    def __init__(self, max_models: int) -> None:
+        self._max_models = max(1, max_models)
+        self._models: OrderedDict[tuple[str, str, str], WhisperModel] = OrderedDict()
+        self._active: tuple[str, str, str] | None = None
+        self._last_used = time.monotonic()
+        self._lock = threading.RLock()
+
+    def get(self, model_size: str, device: str, compute_type: str) -> WhisperModel:
+        key = (model_size, device, compute_type)
+        with self._lock:
+            self._last_used = time.monotonic()
+            model = self._models.get(key)
+            if model is not None and key == self._active:
+                self._models.move_to_end(key)
+                return model
+            self._park_active()
+            if model is not None:
+                if not _resume(model):
+                    self._models.pop(key, None)
+                    model = None
+            if model is None:
+                model = self._load(model_size, device, compute_type)
+                self._models[key] = model
+            self._models.move_to_end(key)
+            self._active = key
+            while len(self._models) > self._max_models:
+                self._models.popitem(last=False)
+            self._last_used = time.monotonic()
+            return model
+
+    def touch(self) -> None:
+        with self._lock:
+            self._last_used = time.monotonic()
+
+    def idle_seconds(self) -> float:
+        with self._lock:
+            return time.monotonic() - self._last_used
+
+    def loaded(self) -> list[str]:
+        with self._lock:
+            return [key[0] for key in self._models]
+
+    def clear(self) -> bool:
+        with self._lock:
+            had_models = bool(self._models)
+            self._models.clear()
+            self._active = None
+        if had_models:
+            gc.collect()
+        return had_models
+
+    def _park_active(self) -> None:
+        if self._active is None:
+            return
+        model = self._models.get(self._active)
+        self._active = None
+        if model is None or self._max_models == 1:
+            self._models.clear()
+            return
+        if model.model.device == "cuda":
+            try:
+                model.model.unload_model(to_cpu=True)
+            except Exception:  # noqa: BLE001 - parking is an optimisation, never a failure
+                logger.warning("No se pudo mover el modelo a la RAM; se descarta", exc_info=True)
+                self._models = OrderedDict(
+                    (key, value) for key, value in self._models.items() if value is not model
+                )
+
+    @staticmethod
+    def _load(model_size: str, device: str, compute_type: str) -> WhisperModel:
+        was_cached = is_model_cached(model_size)
+        logger.info(
+            "Loading whisper model=%s device=%s compute_type=%s (%s)",
+            model_size,
+            device,
+            compute_type,
+            "cache hit" if was_cached else "downloading — first run only",
+        )
+        return WhisperModel(
+            model_size,
+            device=device,
+            compute_type=compute_type,
+            download_root=str(settings.models_dir),
+        )
+
+
+def _resume(model: WhisperModel) -> bool:
+    try:
+        if not model.model.model_is_loaded:
+            model.model.load_model()
+        return True
+    except Exception:  # noqa: BLE001 - fall back to a fresh load from disk
+        logger.warning("No se pudo reactivar el modelo aparcado; se recarga", exc_info=True)
+        return False
+
+
+model_cache = ModelCache(settings.max_cached_models)
+
+
 def get_model(model_size: str, device: str, compute_type: str) -> WhisperModel:
-    was_cached = is_model_cached(model_size)
-    logger.info(
-        "Loading whisper model=%s device=%s compute_type=%s (%s)",
-        model_size,
-        device,
-        compute_type,
-        "cache hit" if was_cached else "downloading — first run only",
-    )
-    return WhisperModel(
-        model_size,
-        device=device,
-        compute_type=compute_type,
-        download_root=str(settings.models_dir),
-    )
+    return model_cache.get(model_size, device, compute_type)
 
 
 def is_model_cached(model_size: str) -> bool:

@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { TranscriptResult } from "../api/types";
+import { timestampLink } from "../lib/videoUrls";
 import { CopyButton } from "./CopyButton";
 import { ExportMenu } from "./ExportMenu";
 import { Icon } from "./Icon";
@@ -79,16 +80,30 @@ export function TranscriptView({
       </div>
       <div className="transcript-text">
         {result.segments.length ? (
-          result.segments.map((segment, index) => (
-            <p key={index}>
-              {showTimestamps && (
-                <span className="timestamp">
-                  {formatTimestamp(segment.start)}
-                </span>
-              )}
-              {segment.text}
-            </p>
-          ))
+          result.segments.map((segment, index) => {
+            const link = timestampLink(result.source, segment.start);
+            return (
+              <p key={index}>
+                {showTimestamps &&
+                  (link ? (
+                    <a
+                      className="timestamp"
+                      href={link}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="Abrir el vídeo en este momento"
+                    >
+                      {formatTimestamp(segment.start)}
+                    </a>
+                  ) : (
+                    <span className="timestamp">
+                      {formatTimestamp(segment.start)}
+                    </span>
+                  ))}
+                {segment.text}
+              </p>
+            );
+          })
         ) : (
           <p>{result.text || "No se detectó voz en este archivo."}</p>
         )}
@@ -106,12 +121,23 @@ export function TranscriptView({
           {result.audio_format_id
             ? ` · Formato de audio ${result.audio_format_id}`
             : ""}
+          {result.requested_language
+            ? ` · Idioma indicado: ${result.requested_language}`
+            : ""}
+          {result.task === "translate" ? " · Traducido al inglés" : ""}
+          {result.word_timestamps ? " · Marcas por palabra" : ""}
+          {result.initial_prompt
+            ? ` · Vocabulario: ${result.initial_prompt}`
+            : ""}
         </p>
         {Object.keys(result.timings ?? {}).length > 0 && (
           <p>
-            {Object.entries(result.timings ?? {}).map(([stage, seconds]) =>
-              `${TIMING_LABELS[stage] ?? stage}: ${seconds.toLocaleString("es", { maximumFractionDigits: 2 })} s`,
-            ).join(" · ")}
+            {Object.entries(result.timings ?? {})
+              .map(
+                ([stage, seconds]) =>
+                  `${TIMING_LABELS[stage] ?? stage}: ${seconds.toLocaleString("es", { maximumFractionDigits: 2 })} s`,
+              )
+              .join(" · ")}
           </p>
         )}
       </details>

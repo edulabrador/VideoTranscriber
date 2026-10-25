@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 
-import { del, getJson } from "../api/client";
+import { del, getJson, postJson } from "../api/client";
 import { isTerminalStatus } from "../api/types";
-import type { HistoryItem, TranscriptResult } from "../api/types";
+import type { HistoryItem, JobResponse, TranscriptResult } from "../api/types";
 import { useJobContext } from "../context/JobContext";
 import { useHistory } from "../hooks/useHistory";
 import { Icon } from "./Icon";
+import { HISTORY_CHANGED_EVENT } from "./JobQueue";
 
 function savedDate(value: string) {
   const date = new Date(value);
@@ -48,6 +49,28 @@ export function HistoryList() {
     }
   };
 
+  const retry = async (entry: HistoryItem) => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      const job = await postJson<JobResponse>("/api/jobs", {
+        url: entry.source,
+        force: true,
+      });
+      await del(`/api/history/${entry.id}`);
+      dispatch({ type: "START_JOB", jobId: job.id });
+      refresh();
+    } catch (err) {
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : "No se pudo reintentar la transcripción",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const remove = async (entry: HistoryItem) => {
     if (
       !window.confirm(
@@ -73,8 +96,13 @@ export function HistoryList() {
   };
 
   useEffect(() => {
-    if (state.status === "completed") refresh();
+    if (state.status === "completed" || state.status === "failed") refresh();
   }, [state.status, refresh]);
+
+  useEffect(() => {
+    window.addEventListener(HISTORY_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(HISTORY_CHANGED_EVENT, refresh);
+  }, [refresh]);
 
   return (
     <section className="panel library-panel" aria-labelledby="library-title">
@@ -140,41 +168,65 @@ export function HistoryList() {
       )}
       {entries.length > 0 && (
         <ul className="library-list">
-          {entries.map((entry) => (
-            <li key={entry.id} className="library-item">
-              <div className="library-item-head">
-                <span className="library-file-icon">
-                  <Icon name="file" size={17} />
-                </span>
-                <div className="library-item-main">
-                  <h3 title={entry.title}>{entry.title}</h3>
-                  <p className="library-item-meta">
-                    {savedDate(entry.created_at)} · {entry.word_count} palabras
-                  </p>
+          {entries.map((entry) => {
+            const failed = entry.status === "failed";
+            return (
+              <li
+                key={entry.id}
+                className={`library-item ${failed ? "failed" : ""}`}
+              >
+                <div className="library-item-head">
+                  <span className="library-file-icon">
+                    <Icon name={failed ? "close" : "file"} size={17} />
+                  </span>
+                  <div className="library-item-main">
+                    <h3 title={entry.title}>{entry.title}</h3>
+                    <p className="library-item-meta">
+                      {savedDate(entry.created_at)} ·{" "}
+                      {failed
+                        ? "No se pudo transcribir"
+                        : `${entry.word_count} palabras`}
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <p className="library-preview">{entry.text || entry.source}</p>
-              <div className="library-item-actions">
-                <button
-                  type="button"
-                  disabled={busy || jobActive}
-                  onClick={() => open(entry.id)}
-                  className="text-button"
-                >
-                  Abrir <Icon name="arrowUp" size={13} />
-                </button>
-                <button
-                  type="button"
-                  disabled={busy || jobActive}
-                  onClick={() => remove(entry)}
-                  className="text-button delete-button"
-                >
-                  <Icon name="trash" size={12} />
-                  Eliminar
-                </button>
-              </div>
-            </li>
-          ))}
+                <p className="library-preview">
+                  {failed ? entry.error : entry.text || entry.source}
+                </p>
+                <div className="library-item-actions">
+                  {failed ? (
+                    entry.source_type === "url" && (
+                      <button
+                        type="button"
+                        disabled={busy || jobActive}
+                        onClick={() => retry(entry)}
+                        className="text-button"
+                      >
+                        Reintentar <Icon name="arrow" size={13} />
+                      </button>
+                    )
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={busy || jobActive}
+                      onClick={() => open(entry.id)}
+                      className="text-button"
+                    >
+                      Abrir <Icon name="arrowUp" size={13} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={busy || jobActive}
+                    onClick={() => remove(entry)}
+                    className="text-button delete-button"
+                  >
+                    <Icon name="trash" size={12} />
+                    Eliminar
+                  </button>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>

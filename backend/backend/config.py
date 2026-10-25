@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     max_history_entries: int = 50
     max_upload_bytes: int = Field(default=512 * 1024 * 1024, gt=0)
     audio_preparation_timeout_seconds: float = Field(default=600, gt=0)
+    # Models kept between jobs. On CUDA only the active one uses VRAM; the rest wait in RAM.
+    max_cached_models: int = Field(default=2, ge=1)
+    # Free every model after this many idle seconds. 0 keeps them loaded forever.
+    model_idle_unload_seconds: float = Field(default=900, ge=0)
 
     def ensure_dirs(self) -> None:
         for path in (self.models_dir, self.output_dir, self.temp_dir, self.history_file.parent):

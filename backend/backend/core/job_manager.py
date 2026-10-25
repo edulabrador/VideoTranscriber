@@ -45,6 +45,9 @@ class JobRecord:
     result: TranscriptionResult | None = None
     error: dict | None = None
     cancel_event: threading.Event = field(default_factory=threading.Event)
+    source: str = ""
+    # Identifies the source and settings, so an identical request reuses this job.
+    dedup_key: str = ""
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -54,7 +57,9 @@ class JobManager:
         self._lock = threading.Lock()
         self._max_jobs = max_jobs
 
-    def create_job(self, job_id: str | None = None) -> JobRecord:
+    def create_job(
+        self, job_id: str | None = None, source: str = "", dedup_key: str = "",
+    ) -> JobRecord:
         with self._lock:
             if job_id and job_id in self._jobs:
                 return self._jobs[job_id]
@@ -70,13 +75,29 @@ class JobManager:
                 if finished_id is None:
                     break
                 self._jobs.pop(finished_id)
-            job = JobRecord(id=job_id or f"job_{uuid.uuid4().hex[:10]}")
+            job = JobRecord(id=job_id or f"job_{uuid.uuid4().hex[:10]}", source=source, dedup_key=dedup_key)
             self._jobs[job.id] = job
         return job
 
     def get_job(self, job_id: str) -> JobRecord | None:
         with self._lock:
             return self._jobs.get(job_id)
+
+    def list_jobs(self) -> list[JobRecord]:
+        with self._lock:
+            return list(self._jobs.values())
+
+    def find_active(self, dedup_key: str) -> JobRecord | None:
+        """An unfinished job for the same source and settings."""
+        with self._lock:
+            return next(
+                (
+                    job for job in self._jobs.values()
+                    if job.dedup_key == dedup_key and job.status not in _TERMINAL_STATUSES
+                    and not job.cancel_event.is_set()
+                ),
+                None,
+            )
 
     def remove_job(self, job_id: str) -> None:
         with self._lock:
@@ -91,6 +112,8 @@ class JobManager:
     ) -> None:
         job = self.get_job(job_id)
         if job is not None:
+            if job.cancel_event.is_set() and status not in _TERMINAL_STATUSES:
+                return  # Keep showing "cancelling" until the worker actually stops.
             job.status = status
             job.stage_message = message
             progress = _STAGE_PROGRESS[status] if progress_percent is None else progress_percent

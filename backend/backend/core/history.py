@@ -1,19 +1,38 @@
 import json
+import logging
 import re
 import shutil
 import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from backend.config import settings
 from backend.core.exporter import PROCESSING_VERSION, read_json, result_from_payload
-from backend.core.model_manager import resolve_model_size, select_device
+from backend.core.model_manager import select_device
 from backend.core.transcriber import (
-    TranscriptionProfile, TranscriptionResult, resolve_profile_settings,
+    TranscriptionOptions,
+    TranscriptionProfile,
+    TranscriptionResult,
+    resolve_job_model,
 )
 
 _QUALITY_RANK = {"compact": 0, "balanced": 1, "best": 2}
+# Marks a folder whose history entry was deleted on purpose while keeping its files.
+KEPT_MARKER = ".kept"
+_JOB_ID = re.compile(r"job_[A-Za-z0-9_-]{1,64}")
+_YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"}
+_KNOWN_PATH_HOSTS = {"instagram.com", "tiktok.com", "x.com", "twitter.com"}
+_TRACKING_PARAMS = re.compile(r"^(?:utm_.*|si|s|t|igsh|igshid|feature|ref|ref_src|fbclid|gclid)$")
+logger = logging.getLogger(__name__)
+
+
+def _bare_host(host: str) -> str:
+    host = host.lower()
+    for prefix in ("www.", "m.", "mobile."):
+        if host.startswith(prefix):
+            return host[len(prefix):]
+    return host
 
 
 def _source_key(source: str) -> str:
@@ -21,19 +40,45 @@ def _source_key(source: str) -> str:
     if parsed.scheme not in {"http", "https"}:
         return source.strip()
     host = (parsed.hostname or "").lower()
-    if host in {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"}:
+    path = parsed.path.rstrip("/")
+    if host in _YOUTUBE_HOSTS:
         video_id = parse_qs(parsed.query).get("v", [""])[0]
         if video_id:
             return f"youtube:{video_id}"
-    if host in {"youtu.be", "www.youtu.be"}:
-        video_id = parsed.path.strip("/").split("/", 1)[0]
-        if video_id:
-            return f"youtube:{video_id}"
-    if host in {"youtube.com", "www.youtube.com", "m.youtube.com"}:
-        parts = parsed.path.strip("/").split("/")
+        parts = path.strip("/").split("/")
         if len(parts) == 2 and parts[0] in {"shorts", "live", "embed"}:
             return f"youtube:{parts[1]}"
-    return f"{parsed.netloc.lower()}{parsed.path.rstrip('/')}"
+    if host in {"youtu.be", "www.youtu.be"}:
+        video_id = path.strip("/").split("/", 1)[0]
+        if video_id:
+            return f"youtube:{video_id}"
+    bare = _bare_host(host)
+    if bare == "twitter.com":
+        bare = "x.com"
+    if bare == "instagram.com":
+        # /reel/, /reels/, /p/ and /tv/ address the same post by its shortcode.
+        match = re.match(r"^/(?:reels?|p|tv)/([A-Za-z0-9_-]+)", path)
+        if match:
+            return f"instagram:{match.group(1)}"
+    if bare == "x.com":
+        match = re.match(r"^/[^/]+/status/(\d+)", path)
+        if match:
+            return f"x:{match.group(1)}"
+    if bare == "tiktok.com":
+        match = re.match(r"^/@[^/]+/video/(\d+)", path)
+        if match:
+            return f"tiktok:{match.group(1)}"
+    if bare in _KNOWN_PATH_HOSTS:
+        return f"{bare}{path}"
+    # Other sites may identify the video in the query string, so keep it minus tracking.
+    query = sorted(
+        (key, value)
+        for key, values in parse_qs(parsed.query).items()
+        if not _TRACKING_PARAMS.match(key)
+        for value in values
+    )
+    suffix = f"?{urlencode(query)}" if query else ""
+    return f"{bare}{path}{suffix}"
 
 
 @dataclass
@@ -46,6 +91,8 @@ class HistoryItem:
     duration: float
     word_count: int
     language: str
+    status: str = "completed"  # "completed" | "failed"
+    error: str | None = None
 
 
 class HistoryStore:
@@ -73,16 +120,24 @@ class HistoryStore:
             temporary.unlink(missing_ok=True)
 
     def _job_dir(self, item_id: str) -> Path | None:
-        if not re.fullmatch(r"job_[A-Za-z0-9_-]{1,64}", item_id):
+        if not _JOB_ID.fullmatch(item_id):
             return None
         path = self._output_dir / item_id
         if path.is_symlink() or path.resolve().parent != self._output_dir.resolve():
             return None
         return path
 
+    def _remove_files(self, item_id: str) -> None:
+        path = self._job_dir(item_id)
+        if path is not None and path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+
     def load_result(self, item_id: str) -> TranscriptionResult | None:
         with self._lock:
-            if not any(entry.get("id") == item_id for entry in self._read()):
+            if not any(
+                entry.get("id") == item_id and entry.get("status", "completed") == "completed"
+                for entry in self._read()
+            ):
                 return None
             path = self._job_dir(item_id)
             if path is None:
@@ -94,32 +149,52 @@ class HistoryStore:
 
     def add_entry(self, item: HistoryItem) -> None:
         with self._lock:
-            entries = self._read()
+            entries = [entry for entry in self._read() if entry.get("id") != item.id]
             entries.insert(0, asdict(item))
-            entries = entries[: self._max_entries]
-            self._write(entries)
+            kept, dropped = entries[: self._max_entries], entries[self._max_entries:]
+            self._write(kept)
+        # Entries pushed out of the history can no longer be opened; free their files.
+        for entry in dropped:
+            self._remove_files(str(entry.get("id", "")))
+
+    def orphan_outputs(self) -> list[Path]:
+        """Output folders no history entry references and nobody chose to keep."""
+        with self._lock:
+            known = {entry.get("id") for entry in self._read()}
+        if not self._output_dir.exists():
+            return []
+        return sorted(
+            path for path in self._output_dir.iterdir()
+            if path.is_dir() and not path.is_symlink() and _JOB_ID.fullmatch(path.name)
+            and path.name not in known and not (path / KEPT_MARKER).exists()
+        )
 
     def list_entries(self, query: str = "") -> list[dict]:
         with self._lock:
             entries = self._read()
             matches: list[dict] = []
+            previews = 0
             query = query.strip().casefold()
             for entry in entries:
                 path = self._job_dir(entry["id"])
                 if path is None:
                     continue
+                entry.setdefault("status", "completed")
                 text = ""
                 try:
-                    if query or len(matches) < 2:
+                    if entry["status"] == "completed" and (query or previews < 2):
                         with (path / "transcript.txt").open(encoding="utf-8") as transcript:
                             text = transcript.read() if query else transcript.read(240)
                 except OSError:
                     pass
-                searchable = " ".join((entry.get("title", ""), entry.get("source", ""), text))
+                searchable = " ".join(
+                    (entry.get("title", ""), entry.get("source", ""), entry.get("error") or "", text)
+                )
                 if query and query not in searchable.casefold():
                     continue
-                if text and len(matches) < 2:
+                if text and previews < 2:
                     entry["text"] = text[:240]
+                    previews += 1
                 matches.append(entry)
             return matches
 
@@ -128,15 +203,20 @@ class HistoryStore:
         source: str,
         profile: TranscriptionProfile,
         audio_quality: str,
+        options: TranscriptionOptions | None = None,
     ) -> tuple[str, TranscriptionResult] | None:
+        options = options or TranscriptionOptions()
         source_key = _source_key(source)
-        model, beam_size = resolve_profile_settings(profile, settings.model_size, settings.beam_size)
         device = select_device(settings.device)
-        model = resolve_model_size(model, device)
+        model, beam_size = resolve_job_model(
+            profile, options, settings.model_size, settings.beam_size, device,
+        )
         with self._lock:
             entries = self._read()
 
         for entry in entries:
+            if entry.get("status", "completed") != "completed":
+                continue
             if _source_key(entry.get("source", "")) != source_key:
                 continue
             job_dir = self._job_dir(entry["id"])
@@ -150,10 +230,15 @@ class HistoryStore:
                 quality_is_sufficient = _QUALITY_RANK.get(cached_quality, 0) >= _QUALITY_RANK[
                     audio_quality
                 ]
+                cached_options = {
+                    key: payload.get(key, default)
+                    for key, default in TranscriptionOptions().cache_fields().items()
+                }
                 compatible = (
                     payload.get("processing_version") == PROCESSING_VERSION
                     and payload.get("model_size") == model
                     and payload.get("beam_size") == beam_size
+                    and cached_options == options.cache_fields()
                 )
                 if compatible and cached_profile == profile and quality_is_sufficient:
                     return entry["id"], result_from_payload(payload)
@@ -173,6 +258,10 @@ class HistoryStore:
                     return False
                 if path.exists():
                     shutil.rmtree(path)
+            else:
+                path = self._job_dir(item_id)
+                if path is not None and path.is_dir():
+                    (path / KEPT_MARKER).touch()
             self._write(filtered)
             return True
 

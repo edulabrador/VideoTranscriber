@@ -16,6 +16,21 @@ export function isTerminalStatus(status: JobStatus | null): boolean {
 
 export type TranscriptionProfile = "fast" | "balanced" | "precise";
 export type AudioQuality = "compact" | "balanced" | "best";
+export type TranscriptionTask = "transcribe" | "translate";
+
+export interface TranscriptionOptions {
+  language: string | null;
+  task: TranscriptionTask;
+  initial_prompt: string | null;
+  word_timestamps: boolean;
+}
+
+export const DEFAULT_OPTIONS: TranscriptionOptions = {
+  language: null,
+  task: "transcribe",
+  initial_prompt: null,
+  word_timestamps: false,
+};
 
 export interface JobResponse {
   id: string;
@@ -34,6 +49,8 @@ export interface JobStatusResponse {
   stage_message: string;
   progress_percent: number;
   error: JobError | null;
+  source?: string;
+  created_at?: string;
 }
 
 export interface TranscriptWord {
@@ -65,6 +82,11 @@ export interface TranscriptResult {
   audio_language?: string | null;
   audio_format_id?: string | null;
   audio_selection?: "original" | "default" | null;
+  requested_language?: string | null;
+  task?: TranscriptionTask;
+  initial_prompt?: string | null;
+  word_timestamps?: boolean;
+  source?: string;
 }
 
 export interface HistoryItem {
@@ -77,6 +99,8 @@ export interface HistoryItem {
   word_count: number;
   language: string;
   text?: string;
+  status?: "completed" | "failed";
+  error?: string | null;
 }
 
 export interface HealthResponse {
@@ -88,4 +112,4 @@ export interface HealthResponse {
   batch_size: number;
 }
 
-export type ExportFormat = "txt" | "srt" | "json";
+export type ExportFormat = "txt" | "md" | "srt" | "vtt" | "json";
