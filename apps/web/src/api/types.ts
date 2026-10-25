@@ -95,6 +95,14 @@ export interface TranscriptResult {
   diarize?: boolean;
   num_speakers?: number | null;
   source?: string;
+  edited?: boolean;
+  has_audio?: boolean;
+  summary?: string | null;
+}
+
+export interface SummaryStatus {
+  available: boolean;
+  model: string | null;
 }
 
 export interface HistoryItem {
@@ -120,4 +128,4 @@ export interface HealthResponse {
   batch_size: number;
 }
 
-export type ExportFormat = "txt" | "md" | "srt" | "vtt" | "json";
+export type ExportFormat = "txt" | "md" | "srt" | "vtt" | "json" | "summary";

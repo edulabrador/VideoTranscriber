@@ -17,6 +17,10 @@ const paths = {
   copy: "M8 8h13v13H8V8Zm8-4V2H2v14h2",
   clock: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM12 7v5l3 2",
   trash: "M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7",
+  edit: "M4 20h4L19 9l-4-4L4 16v4Zm9-13 4 4",
+  play: "M7 4v16l13-8L7 4Z",
+  sparkle:
+    "M12 3v4m0 10v4M3 12h4m10 0h4M6 6l2.5 2.5m7 7L18 18M6 18l2.5-2.5m7-7L18 6",
 } as const;
 
 export function Icon({
