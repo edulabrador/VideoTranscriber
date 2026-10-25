@@ -221,7 +221,7 @@ def test_speaker_count_is_ignored_without_diarization():
 
 
 @pytest.mark.skipif(
-    not os.environ.get("VIDEO_TRANSCRIBER_LIVE_TEST"), reason="downloads models and audio",
+    not os.environ.get("VIDEO_TRANSCRIBER_MODEL_TEST"), reason="downloads models and audio",
 )
 def test_real_four_speaker_recording(tmp_path, monkeypatch):
     from urllib.request import urlretrieve
