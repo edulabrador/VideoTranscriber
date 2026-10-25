@@ -1,4 +1,5 @@
 import asyncio
+import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import PureWindowsPath
@@ -15,6 +16,8 @@ from backend.api.schemas import (
     JobErrorPayload,
     JobResponse,
     JobStatusResponse,
+    SummaryResponse,
+    SummaryStatusResponse,
     TranscriptEditRequest,
     TranscriptionOptionsSchema,
     TranscriptResultSchema,
@@ -34,12 +37,14 @@ from backend.core.model_manager import (
     resolve_compute_type,
     select_device,
 )
+from backend.core import summarizer
 from backend.core.pipeline import LISTENING_COPY, FileSource, Source, URLSource, run_pipeline
 from backend.core.transcriber import (
     TranscriptionOptions,
     TranscriptionProfile,
     TranscriptionResult,
 )
+from backend.core.summarizer import SUMMARY_FILE
 from backend.core.validators import validate_supported_url
 
 router = APIRouter(prefix="/api")
@@ -50,6 +55,7 @@ _ALLOWED_EXPORT_FORMATS = {
     "vtt": "subtitles.vtt",
     "md": "transcript.md",
     "json": "transcript.json",
+    "summary": SUMMARY_FILE,
 }
 # Browsers often send these as application/octet-stream or with no type at all.
 # FFmpeg makes the real decision when it prepares the audio.
@@ -287,11 +293,44 @@ async def get_job_result(job_id: str) -> TranscriptResultSchema:
     job = _get_job(job_id)
     if job.status != "completed" or job.result is None:
         raise HTTPException(status_code=409, detail="La transcripción todavía no ha terminado")
-    return _result_schema(job.result, _has_audio(job_id))
+    return _result_schema(job.result, _has_audio(job_id), _summary(job_id))
 
 
 def _has_audio(job_id: str) -> bool:
     return (settings.output_dir / job_id / LISTENING_COPY).is_file()
+
+
+def _summary(job_id: str) -> str | None:
+    try:
+        return (settings.output_dir / job_id / SUMMARY_FILE).read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+@router.get("/summary/status", response_model=SummaryStatusResponse)
+async def summary_status() -> SummaryStatusResponse:
+    current = await asyncio.to_thread(summarizer.status)
+    return SummaryStatusResponse(available=current.available, model=current.model)
+
+
+@router.post("/jobs/{job_id}/summary", response_model=SummaryResponse)
+async def create_summary(job_id: str) -> SummaryResponse:
+    """Summarise with the local Ollama server and save summary.md next to the exports."""
+    job = _get_job(job_id)
+    if job.status != "completed" or job.result is None:
+        raise HTTPException(status_code=409, detail="La transcripción todavía no ha terminado")
+    folder = settings.output_dir / job_id
+    if not (folder / "transcript.json").is_file():
+        raise HTTPException(status_code=404, detail="No se encontró la transcripción")
+    title = json.loads((folder / "transcript.json").read_text(encoding="utf-8")).get("title", "")
+    try:
+        markdown = await asyncio.to_thread(summarizer.summarize, job.result, title or job_id)
+    except summarizer.SummaryError as exc:
+        raise HTTPException(
+            status_code=503, detail={"code": exc.code, "message": exc.message}
+        ) from exc
+    (folder / SUMMARY_FILE).write_text(markdown, encoding="utf-8")
+    return SummaryResponse(markdown=markdown)
 
 
 @router.get("/jobs/{job_id}/audio")
@@ -322,12 +361,15 @@ async def edit_transcript(job_id: str, payload: TranscriptEditRequest) -> Transc
     if result is None:
         raise HTTPException(status_code=404, detail="No se encontró la transcripción")
     job_manager.set_result(job_id, result, "Transcripción corregida.")
-    return _result_schema(result, _has_audio(job_id))
+    return _result_schema(result, _has_audio(job_id), _summary(job_id))
 
 
-def _result_schema(result: TranscriptionResult, has_audio: bool) -> TranscriptResultSchema:
+def _result_schema(
+    result: TranscriptionResult, has_audio: bool, summary: str | None = None,
+) -> TranscriptResultSchema:
     return TranscriptResultSchema(
         has_audio=has_audio,
+        summary=summary,
         segments=[
             TranscriptSegmentSchema(
                 start=seg.start,

@@ -17,7 +17,13 @@ class Settings(BaseSettings):
     cookies_file: Path | None = None
     cobalt_api_url: str | None = "http://127.0.0.1:9187"
 
-    @field_validator("cookies_file", "cobalt_api_url", mode="before")
+    # Optional local summaries. Leave OLLAMA_URL empty to hide the feature.
+    ollama_url: str | None = "http://127.0.0.1:11434"
+    ollama_model: str | None = None  # None uses the first model installed in Ollama.
+    ollama_timeout_seconds: float = Field(default=600, gt=0)
+    summary_language: str = "español"
+
+    @field_validator("cookies_file", "cobalt_api_url", "ollama_url", "ollama_model", mode="before")
     @classmethod
     def empty_optional_setting_is_none(cls, value):
         return None if value == "" else value

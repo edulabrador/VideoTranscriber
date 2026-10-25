@@ -109,6 +109,7 @@ class TranscriptResultSchema(BaseModel):
     source: str = ""
     edited: bool = False
     has_audio: bool = False
+    summary: str | None = None
 
 
 class HistoryItemSchema(BaseModel):
@@ -123,6 +124,15 @@ class HistoryItemSchema(BaseModel):
     text: str | None = None
     status: Literal["completed", "failed"] = "completed"
     error: str | None = None
+
+
+class SummaryStatusResponse(BaseModel):
+    available: bool
+    model: str | None = None
+
+
+class SummaryResponse(BaseModel):
+    markdown: str
 
 
 class HealthResponse(BaseModel):
