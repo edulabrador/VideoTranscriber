@@ -14,6 +14,7 @@ const SHORT_LABELS: Record<JobStatusResponse["status"], string> = {
   extracting_audio: "Preparando",
   loading_model: "Cargando modelo",
   transcribing: "Transcribiendo",
+  diarizing: "Hablantes",
   exporting: "Guardando",
   completed: "Lista",
   failed: "Error",

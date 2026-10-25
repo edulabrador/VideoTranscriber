@@ -61,6 +61,10 @@ export function FileDropZone({
         form.append("profile", profile);
         form.append("task", options.task);
         form.append("word_timestamps", String(options.word_timestamps));
+        form.append("diarize", String(options.diarize));
+        if (options.diarize && options.num_speakers) {
+          form.append("num_speakers", String(options.num_speakers));
+        }
         if (options.language) form.append("language", options.language);
         if (options.initial_prompt)
           form.append("initial_prompt", options.initial_prompt);

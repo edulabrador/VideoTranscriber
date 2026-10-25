@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { TranscriptResult } from "../api/types";
+import { copyableText, speakers } from "../lib/transcript";
 import { timestampLink } from "../lib/videoUrls";
 import { CopyButton } from "./CopyButton";
 import { ExportMenu } from "./ExportMenu";
@@ -19,6 +20,7 @@ const TIMING_LABELS: Record<string, string> = {
   model_loading: "Carga del modelo",
   audio_analysis: "Análisis del audio",
   transcription: "Transcripción",
+  diarization: "Identificación de hablantes",
   processing_total: "Total de procesamiento",
 };
 
@@ -36,6 +38,7 @@ export function TranscriptView({
   result: TranscriptResult;
 }) {
   const [showTimestamps, setShowTimestamps] = useState(true);
+  const speakerNames = speakers(result);
   return (
     <section
       className="panel transcript-panel"
@@ -59,6 +62,13 @@ export function TranscriptView({
         </span>
         <span>{result.word_count} palabras</span>
         <span>Idioma: {result.language.toUpperCase()}</span>
+        {speakerNames.length > 0 && (
+          <span>
+            {speakerNames.length === 1
+              ? "1 hablante"
+              : `${speakerNames.length} hablantes`}
+          </span>
+        )}
         {result.audio_selection && (
           <span>
             {result.audio_selection === "original"
@@ -82,8 +92,21 @@ export function TranscriptView({
         {result.segments.length ? (
           result.segments.map((segment, index) => {
             const link = timestampLink(result.source, segment.start);
+            const newSpeaker =
+              segment.speaker &&
+              segment.speaker !== result.segments[index - 1]?.speaker;
             return (
-              <p key={index}>
+              <p
+                key={index}
+                className={newSpeaker ? "speaker-turn" : undefined}
+              >
+                {newSpeaker && (
+                  <span
+                    className={`speaker-label speaker-${speakerNames.indexOf(segment.speaker ?? "") % 6}`}
+                  >
+                    {segment.speaker}
+                  </span>
+                )}
                 {showTimestamps &&
                   (link ? (
                     <a
@@ -109,7 +132,7 @@ export function TranscriptView({
         )}
       </div>
       <div className="transcript-actions">
-        <CopyButton text={result.text} />
+        <CopyButton text={copyableText(result)} />
         <ExportMenu jobId={jobId} />
       </div>
       <details className="transcript-tech">
@@ -126,6 +149,9 @@ export function TranscriptView({
             : ""}
           {result.task === "translate" ? " · Traducido al inglés" : ""}
           {result.word_timestamps ? " · Marcas por palabra" : ""}
+          {result.diarize
+            ? ` · Hablantes ${result.num_speakers ? `indicados: ${result.num_speakers}` : "detectados automáticamente"}`
+            : ""}
           {result.initial_prompt
             ? ` · Vocabulario: ${result.initial_prompt}`
             : ""}

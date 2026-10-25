@@ -173,6 +173,8 @@ async def create_job_from_upload(
     task: Annotated[str, Form()] = "transcribe",
     initial_prompt: Annotated[str | None, Form()] = None,
     word_timestamps: Annotated[bool, Form()] = False,
+    diarize: Annotated[bool, Form()] = False,
+    num_speakers: Annotated[int | None, Form()] = None,
 ) -> JobResponse:
     job = None
     upload_dir = None
@@ -181,6 +183,7 @@ async def create_job_from_upload(
             options = TranscriptionOptionsSchema(
                 language=language or None, task=task,  # type: ignore[arg-type]
                 initial_prompt=initial_prompt or None, word_timestamps=word_timestamps,
+                diarize=diarize, num_speakers=num_speakers,
             ).to_options()
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail="Opciones de transcripción no válidas") from exc
@@ -275,6 +278,7 @@ async def get_job_result(job_id: str) -> TranscriptResultSchema:
                 start=seg.start,
                 end=seg.end,
                 text=seg.text,
+                speaker=seg.speaker,
                 words=[
                     TranscriptWordSchema(start=w.start, end=w.end, word=w.word)
                     for w in seg.words

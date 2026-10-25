@@ -10,6 +10,7 @@ const LABELS: Record<JobStatus, string> = {
   extracting_audio: "Preparando el archivo",
   loading_model: "Preparando el modelo",
   transcribing: "Dando forma al texto",
+  diarizing: "Reconociendo las voces",
   exporting: "Últimos detalles",
   completed: "Tu texto está listo",
   failed: "No hemos podido terminar",

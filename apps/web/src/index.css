@@ -1540,3 +1540,34 @@ a.timestamp:hover {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Speaker turns */
+.speaker-turn {
+  margin-top: 6px;
+}
+.speaker-label {
+  display: block;
+  width: fit-content;
+  margin-bottom: 3px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--speaker-ink, var(--accent));
+  background: var(--speaker-soft, var(--accent-soft));
+}
+.speaker-0 { --speaker-ink: var(--accent); --speaker-soft: var(--accent-soft); }
+.speaker-1 { --speaker-ink: #8a4f7d; --speaker-soft: #f5e9f2; }
+.speaker-2 { --speaker-ink: #8a6420; --speaker-soft: #f8efdc; }
+.speaker-3 { --speaker-ink: #3e5f9a; --speaker-soft: #e6edf8; }
+.speaker-4 { --speaker-ink: #5b7a2e; --speaker-soft: #ebf2df; }
+.speaker-5 { --speaker-ink: #a54f50; --speaker-soft: #fbefec; }
+.dark .speaker-1 { --speaker-ink: #e3b5d8; --speaker-soft: #4a3445; }
+.dark .speaker-2 { --speaker-ink: #e6c18d; --speaker-soft: #443d30; }
+.dark .speaker-3 { --speaker-ink: #b3c7ec; --speaker-soft: #303d55; }
+.dark .speaker-4 { --speaker-ink: #c5dca3; --speaker-soft: #384330; }
+.dark .speaker-5 { --speaker-ink: #edb0a9; --speaker-soft: #483537; }
+.speakers-field {
+  margin-top: 12px;
+}

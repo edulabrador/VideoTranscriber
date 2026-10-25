@@ -24,6 +24,7 @@ class Cue:
     start: float
     end: float
     text: str
+    speaker: str | None = None
 
 
 def _timestamp(seconds: float, separator: str) -> str:
@@ -45,20 +46,30 @@ def _clock(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
 
 
-def paragraphs(segments: list[TranscriptSegment]) -> list[tuple[float, str]]:
-    """Group segments into paragraphs separated by pauses. Returns (start, text)."""
-    groups: list[tuple[float, list[str]]] = []
+@dataclass
+class Paragraph:
+    start: float
+    text: str
+    speaker: str | None = None
+
+
+def paragraphs(segments: list[TranscriptSegment]) -> list[Paragraph]:
+    """Group segments into paragraphs, starting a new one after a pause or a speaker change."""
+    groups: list[tuple[float, str | None, list[str]]] = []
     previous_end: float | None = None
     for segment in segments:
         if not segment.text:
             continue
-        if not groups or (
-            previous_end is not None and segment.start - previous_end > PARAGRAPH_PAUSE_SECONDS
-        ):
-            groups.append((segment.start, []))
-        groups[-1][1].append(segment.text)
+        pause = previous_end is not None and segment.start - previous_end > PARAGRAPH_PAUSE_SECONDS
+        if not groups or pause or segment.speaker != groups[-1][1]:
+            groups.append((segment.start, segment.speaker, []))
+        groups[-1][2].append(segment.text)
         previous_end = segment.end
-    return [(start, " ".join(parts)) for start, parts in groups]
+    return [Paragraph(start, " ".join(parts), speaker) for start, speaker, parts in groups]
+
+
+def _with_speaker(paragraph: Paragraph) -> str:
+    return f"{paragraph.speaker}: {paragraph.text}" if paragraph.speaker else paragraph.text
 
 
 def _timed_words(segment: TranscriptSegment) -> list[TranscriptWord]:
@@ -102,20 +113,34 @@ def subtitle_cues(segments: list[TranscriptSegment]) -> list[Cue]:
             too_long = len(candidate) > max_chars
             too_slow = bool(current) and word.end - current[0].start > SUBTITLE_MAX_SECONDS
             if current and (too_long or too_slow):
-                cues.append(Cue(current[0].start, current[-1].end, " ".join(w.word for w in current)))
+                cues.append(_cue(current, segment.speaker))
                 current = []
             current.append(word)
             if word.word.endswith((".", "?", "!", "…")) and len(candidate) > SUBTITLE_LINE_CHARS:
-                cues.append(Cue(current[0].start, current[-1].end, " ".join(w.word for w in current)))
+                cues.append(_cue(current, segment.speaker))
                 current = []
         if current:
-            cues.append(Cue(current[0].start, current[-1].end, " ".join(w.word for w in current)))
+            cues.append(_cue(current, segment.speaker))
     return cues
+
+
+def _cue(words: list[TranscriptWord], speaker: str | None) -> Cue:
+    return Cue(words[0].start, words[-1].end, " ".join(w.word for w in words), speaker)
+
+
+def _speaker_changes(cues: list[Cue]) -> list[bool]:
+    """Whether each cue starts a new speaker turn, so names are not repeated on every cue."""
+    previous: str | None = None
+    changes = []
+    for cue in cues:
+        changes.append(cue.speaker is not None and cue.speaker != previous)
+        previous = cue.speaker
+    return changes
 
 
 def write_txt(result: TranscriptionResult, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    blocks = [text for _start, text in paragraphs(result.segments)] or [result.text]
+    blocks = [_with_speaker(item) for item in paragraphs(result.segments)] or [result.text]
     path.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
     return path
 
@@ -123,10 +148,12 @@ def write_txt(result: TranscriptionResult, path: Path) -> Path:
 def write_srt(result: TranscriptionResult, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines: list[str] = []
-    for i, cue in enumerate(subtitle_cues(result.segments), start=1):
+    cues = subtitle_cues(result.segments)
+    for i, (cue, changed) in enumerate(zip(cues, _speaker_changes(cues)), start=1):
         lines.append(str(i))
         lines.append(f"{_timestamp(cue.start, ',')} --> {_timestamp(cue.end, ',')}")
-        lines.append(_wrap(cue.text))
+        text = _wrap(cue.text)
+        lines.append(f"[{cue.speaker}] {text}" if changed else text)
         lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
@@ -137,7 +164,9 @@ def write_vtt(result: TranscriptionResult, path: Path) -> Path:
     lines = ["WEBVTT", ""]
     for cue in subtitle_cues(result.segments):
         lines.append(f"{_timestamp(cue.start, '.')} --> {_timestamp(cue.end, '.')}")
-        lines.append(_wrap(cue.text))
+        text = _wrap(cue.text)
+        # WebVTT voice spans let players style or announce each speaker.
+        lines.append(f"<v {cue.speaker}>{text}" if cue.speaker else text)
         lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
@@ -146,8 +175,9 @@ def write_vtt(result: TranscriptionResult, path: Path) -> Path:
 def write_markdown(result: TranscriptionResult, path: Path, *, title: str, source: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [f"# {title}", "", f"Fuente: {source}", ""]
-    for start, text in paragraphs(result.segments) or [(0.0, result.text)]:
-        lines.append(f"**[{_clock(start)}]** {text}")
+    for paragraph in paragraphs(result.segments) or [Paragraph(0.0, result.text)]:
+        speaker = f" **{paragraph.speaker}:**" if paragraph.speaker else ""
+        lines.append(f"**[{_clock(paragraph.start)}]**{speaker} {paragraph.text}")
         lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
@@ -229,6 +259,7 @@ def result_from_payload(payload: dict) -> TranscriptionResult:
                     TranscriptWord(start=word["start"], end=word["end"], word=word["word"])
                     for word in segment.get("words", [])
                 ],
+                speaker=segment.get("speaker"),
             )
             for segment in payload["segments"]
         ],
@@ -252,5 +283,7 @@ def result_from_payload(payload: dict) -> TranscriptionResult:
             task=payload.get("task", "transcribe"),
             initial_prompt=payload.get("initial_prompt"),
             word_timestamps=payload.get("word_timestamps", False),
+            diarize=payload.get("diarize", False),
+            num_speakers=payload.get("num_speakers"),
         ),
     )

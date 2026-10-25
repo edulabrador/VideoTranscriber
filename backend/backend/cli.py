@@ -23,6 +23,7 @@ _STAGE_LABELS = {
     "downloading": "Descargando vídeo...",
     "extracting_audio": "Preparando el audio...",
     "transcribing": "Transcribiendo audio...",
+    "diarizing": "Identificando hablantes...",
     "completed": "Transcripción completada.",
 }
 
@@ -93,6 +94,13 @@ def main(
     word_timestamps: bool = typer.Option(
         False, "--word-timestamps", help="Marcas de tiempo por palabra para subtítulos más precisos"
     ),
+    diarize: bool = typer.Option(
+        False, "--diarize", help="Identificar quién habla en cada momento"
+    ),
+    speakers: int = typer.Option(
+        None, "--speakers", min=1, max=20,
+        help="Número de hablantes, si se conoce. Mejora la identificación",
+    ),
     cookies: Path = typer.Option(
         None, "--cookies", help="Ruta de cookies.txt para contenido que requiere iniciar sesión"
     ),
@@ -153,6 +161,8 @@ def main(
         task="translate" if translate else "transcribe",
         initial_prompt=prompt,
         word_timestamps=word_timestamps,
+        diarize=diarize or speakers is not None,
+        num_speakers=speakers,
     )
 
     try:
