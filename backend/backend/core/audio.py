@@ -28,16 +28,39 @@ def normalize_to_wav16k_mono(
     input_path: Path, output_path: Path,
     cancel_event: threading.Event | None = None, *, timeout: float = 600,
 ) -> Path:
+    return _convert(
+        input_path, output_path, ["-ac", "1", "-ar", "16000", "-vn"], cancel_event,
+        timeout=timeout, missing="No se encontró FFmpeg para preparar el archivo subido",
+    )
+
+
+def make_listening_copy(
+    input_path: Path, output_path: Path,
+    cancel_event: threading.Event | None = None, *, timeout: float = 600,
+) -> Path:
+    """Small mono AAC file (about 20 MB per hour) for playback next to the transcript."""
+    return _convert(
+        input_path, output_path,
+        ["-vn", "-ac", "1", "-ar", "22050", "-c:a", "aac", "-b:a", "40k",
+         "-movflags", "+faststart"],
+        cancel_event, timeout=timeout, missing="No se encontró FFmpeg para guardar el audio",
+    )
+
+
+def _convert(
+    input_path: Path, output_path: Path, output_args: list[str],
+    cancel_event: threading.Event | None, *, timeout: float, missing: str,
+) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     ffmpeg = find_ffmpeg()
     if ffmpeg is None:
-        raise AudioExtractionError("No se encontró FFmpeg para preparar el archivo subido")
+        raise AudioExtractionError(missing)
     if cancel_event is not None and cancel_event.is_set():
         raise JobCancelledError()
     # A file, rather than an undrained PIPE, prevents stderr from blocking FFmpeg.
     with tempfile.TemporaryFile() as errors, subprocess.Popen(
         [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i",
-         str(input_path), "-ac", "1", "-ar", "16000", "-vn", str(output_path)],
+         str(input_path), *output_args, str(output_path)],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=errors,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     ) as process:

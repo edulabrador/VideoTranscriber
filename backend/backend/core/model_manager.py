@@ -6,6 +6,9 @@ import sys
 import threading
 import time
 from collections import OrderedDict
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from fnmatch import fnmatch
 from functools import lru_cache
 from pathlib import Path
 
@@ -213,6 +216,72 @@ model_cache = ModelCache(settings.max_cached_models)
 
 def get_model(model_size: str, device: str, compute_type: str) -> WhisperModel:
     return model_cache.get(model_size, device, compute_type)
+
+
+# Files faster-whisper downloads for a model (see faster_whisper.utils.download_model).
+_MODEL_FILE_PATTERNS = (
+    "config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*",
+)
+
+
+def _model_repo(model_size: str) -> str | None:
+    from faster_whisper.utils import _MODELS
+
+    if model_size in _MODELS:
+        return _MODELS[model_size]
+    return model_size if model_size.count("/") == 1 and not Path(model_size).exists() else None
+
+
+def expected_download_bytes(model_size: str) -> int | None:
+    """Total size of the files a first download fetches, or None when unknown."""
+    repo = _model_repo(model_size)
+    if repo is None:
+        return None
+    try:
+        from huggingface_hub import HfApi
+
+        info = HfApi().model_info(repo, files_metadata=True, timeout=10)
+        return sum(
+            sibling.size or 0
+            for sibling in info.siblings or []
+            if any(fnmatch(sibling.rfilename, pattern) for pattern in _MODEL_FILE_PATTERNS)
+        ) or None
+    except Exception:  # noqa: BLE001 - progress is informational only
+        return None
+
+
+def downloaded_bytes(model_size: str) -> int:
+    """Bytes already in the Hugging Face cache folder of a model, partial files included."""
+    repo = _model_repo(model_size)
+    if repo is None:
+        return 0
+    folder = settings.models_dir / f"models--{repo.replace('/', '--')}" / "blobs"
+    try:
+        return sum(path.stat().st_size for path in folder.iterdir() if path.is_file())
+    except OSError:
+        return 0
+
+
+@contextmanager
+def report_download_progress(
+    model_size: str, on_progress: Callable[[int, int | None], None], interval: float = 1.0,
+) -> Iterator[None]:
+    """Call ``on_progress(downloaded, total)`` periodically while a model downloads."""
+    stop = threading.Event()
+    total_holder: list[int | None] = [None]
+
+    def watch() -> None:
+        total_holder[0] = expected_download_bytes(model_size)
+        while not stop.wait(interval):
+            on_progress(downloaded_bytes(model_size), total_holder[0])
+
+    watcher = threading.Thread(target=watch, daemon=True)
+    watcher.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        watcher.join(timeout=interval + 1)
 
 
 def is_model_cached(model_size: str) -> bool:

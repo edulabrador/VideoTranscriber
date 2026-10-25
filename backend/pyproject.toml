@@ -50,3 +50,9 @@ constraint-dependencies = ["filelock>=4.2.1", "setuptools>=84.1.0"]
 python_version = "3.11"
 ignore_missing_imports = true
 disable_error_code = ["import-untyped"]
+
+# huggingface_hub pulls in numpy, whose stubs use Python 3.12 syntax that mypy
+# rejects while checking for 3.11. Only HfApi.model_info is used from it.
+[[tool.mypy.overrides]]
+module = ["huggingface_hub", "huggingface_hub.*", "numpy", "numpy.*"]
+follow_imports = "skip"

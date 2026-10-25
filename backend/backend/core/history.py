@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from backend.config import settings
-from backend.core.exporter import PROCESSING_VERSION, read_json, result_from_payload
+from backend.core.exporter import PROCESSING_VERSION, read_json, result_from_payload, write_all
 from backend.core.model_manager import select_device
 from backend.core.transcriber import (
     TranscriptionOptions,
@@ -264,6 +264,47 @@ class HistoryStore:
             except (KeyError, TypeError, OSError, ValueError):
                 continue
         return None
+
+    def update_transcript(
+        self,
+        item_id: str,
+        segment_texts: dict[int, str] | None = None,
+        speaker_names: dict[str, str] | None = None,
+    ) -> TranscriptionResult | None:
+        """Apply hand corrections and rewrite every export. None if the item is unknown."""
+        with self._lock:
+            entries = self._read()
+            entry = next(
+                (e for e in entries if e.get("id") == item_id
+                 and e.get("status", "completed") == "completed"),
+                None,
+            )
+            path = self._job_dir(item_id)
+            if entry is None or path is None:
+                return None
+            payload = json.loads((path / "transcript.json").read_text(encoding="utf-8"))
+            result = result_from_payload(payload)
+            for index, text in (segment_texts or {}).items():
+                if not 0 <= index < len(result.segments):
+                    raise ValueError(f"No existe el fragmento {index}")
+                result.segments[index].text = text.strip()
+                result.segments[index].words = []  # Old word timings no longer match.
+            for segment in result.segments:
+                if segment.speaker and segment.speaker in (speaker_names or {}):
+                    segment.speaker = (speaker_names or {})[segment.speaker].strip()
+            result.text = " ".join(s.text for s in result.segments if s.text).strip()
+            result.edited = True
+            write_all(
+                result,
+                path,
+                source=payload.get("source", entry.get("source", "")),
+                title=payload.get("title", entry.get("title", "")),
+                created_at=payload.get("created_at", entry.get("created_at", "")),
+                audio_quality=payload.get("audio_quality", "best"),
+            )
+            entry["word_count"] = result.word_count
+            self._write(entries)
+            return result
 
     def delete_entry(self, item_id: str, delete_files: bool = False) -> bool:
         with self._lock:

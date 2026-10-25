@@ -15,6 +15,7 @@ from backend.api.schemas import (
     JobErrorPayload,
     JobResponse,
     JobStatusResponse,
+    TranscriptEditRequest,
     TranscriptionOptionsSchema,
     TranscriptResultSchema,
     TranscriptSegmentSchema,
@@ -33,8 +34,12 @@ from backend.core.model_manager import (
     resolve_compute_type,
     select_device,
 )
-from backend.core.pipeline import FileSource, Source, URLSource, run_pipeline
-from backend.core.transcriber import TranscriptionOptions, TranscriptionProfile
+from backend.core.pipeline import LISTENING_COPY, FileSource, Source, URLSource, run_pipeline
+from backend.core.transcriber import (
+    TranscriptionOptions,
+    TranscriptionProfile,
+    TranscriptionResult,
+)
 from backend.core.validators import validate_supported_url
 
 router = APIRouter(prefix="/api")
@@ -282,8 +287,47 @@ async def get_job_result(job_id: str) -> TranscriptResultSchema:
     job = _get_job(job_id)
     if job.status != "completed" or job.result is None:
         raise HTTPException(status_code=409, detail="La transcripción todavía no ha terminado")
-    result = job.result
+    return _result_schema(job.result, _has_audio(job_id))
+
+
+def _has_audio(job_id: str) -> bool:
+    return (settings.output_dir / job_id / LISTENING_COPY).is_file()
+
+
+@router.get("/jobs/{job_id}/audio")
+async def get_job_audio(job_id: str) -> FileResponse:
+    """Audio copy for playback. FileResponse honours Range requests, so seeking works."""
+    _get_job(job_id)
+    path = settings.output_dir / job_id / LISTENING_COPY
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="No se guardó el audio de esta transcripción")
+    return FileResponse(path, media_type="audio/mp4")
+
+
+@router.patch("/jobs/{job_id}/transcript", response_model=TranscriptResultSchema)
+async def edit_transcript(job_id: str, payload: TranscriptEditRequest) -> TranscriptResultSchema:
+    """Correct segment text and rename speakers; every export is rewritten."""
+    job = _get_job(job_id)
+    if job.status != "completed":
+        raise HTTPException(status_code=409, detail="La transcripción todavía no ha terminado")
+    try:
+        result = await asyncio.to_thread(
+            history_store.update_transcript,
+            job_id,
+            {edit.index: edit.text for edit in payload.segments},
+            payload.speakers,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="No se encontró la transcripción")
+    job_manager.set_result(job_id, result, "Transcripción corregida.")
+    return _result_schema(result, _has_audio(job_id))
+
+
+def _result_schema(result: TranscriptionResult, has_audio: bool) -> TranscriptResultSchema:
     return TranscriptResultSchema(
+        has_audio=has_audio,
         segments=[
             TranscriptSegmentSchema(
                 start=seg.start,
@@ -312,6 +356,7 @@ async def get_job_result(job_id: str) -> TranscriptResultSchema:
         audio_selection=result.audio_selection,
         timings=result.timings,
         source=result.source,
+        edited=result.edited,
         **result.options.cache_fields(),
     )
 

@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     model_idle_unload_seconds: float = Field(default=900, ge=0)
     # Speaker clustering when the number of speakers is not given. Higher merges more
     # voices into one speaker; lower splits them into more.
+    # Keep a small audio copy (about 20 MB per hour) to play it next to the transcript.
+    keep_audio: bool = True
     diarization_threshold: float = Field(default=0.5, gt=0, lt=2)
 
     def ensure_dirs(self) -> None:
