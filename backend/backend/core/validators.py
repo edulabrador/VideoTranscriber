@@ -1,4 +1,5 @@
 import re
+from functools import lru_cache
 from urllib.parse import parse_qs, urlsplit
 
 from backend.core.errors import UnsupportedURLError
@@ -25,10 +26,11 @@ SUPPORTED_URL_PATTERN = re.compile(
     r")/?(?:\?.*)?$"
 )
 
-
-def is_instagram_url(source: str) -> bool:
-    value = source.strip()
-    return bool(SUPPORTED_URL_PATTERN.match(value)) or is_youtube_url(value)
+# Extractors that match almost any URL. Accepting them would turn every web page
+# into a "supported" source and produce confusing download errors instead.
+_CATCH_ALL_EXTRACTORS = {"Generic", "GenericEmbed"}
+# Playlist and channel pages expand to many videos; this app transcribes one video.
+_COLLECTION_HINT = re.compile(r"(?:playlist|channel|user|album|tab|search|feed)", re.I)
 
 
 def is_youtube_url(source: str) -> bool:
@@ -66,8 +68,45 @@ def is_cobalt_url(source: str) -> bool:
     return bool(TIKTOK_URL_PATTERN.match(value) or X_URL_PATTERN.match(value))
 
 
-def validate_instagram_url(url: str) -> None:
-    if not is_instagram_url(url):
+def is_known_platform_url(source: str) -> bool:
+    """YouTube, Instagram, TikTok and X, the platforms with dedicated handling."""
+    value = source.strip()
+    return bool(SUPPORTED_URL_PATTERN.match(value)) or is_youtube_url(value)
+
+
+@lru_cache(maxsize=1)
+def _site_extractors() -> tuple:
+    from yt_dlp.extractor import gen_extractor_classes
+
+    return tuple(
+        extractor for extractor in gen_extractor_classes()
+        if extractor.ie_key() not in _CATCH_ALL_EXTRACTORS and extractor.working()
+    )
+
+
+def site_extractor_name(source: str) -> str | None:
+    """Name of the yt-dlp extractor for a single video on another site, if any."""
+    value = source.strip()
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    for extractor in _site_extractors():
+        if extractor.suitable(value):
+            key = extractor.ie_key()
+            return None if _COLLECTION_HINT.search(key) else key
+    return None
+
+
+def is_supported_url(source: str) -> bool:
+    return is_known_platform_url(source) or site_extractor_name(source) is not None
+
+
+def validate_supported_url(url: str) -> None:
+    if not is_supported_url(url):
         raise UnsupportedURLError(
-            "El enlace no es válido. Pega un vídeo de YouTube, Instagram, TikTok o Twitter (X)."
+            "El enlace no es compatible. Pega un vídeo de YouTube, Instagram, TikTok, "
+            "Twitter (X) u otro sitio de vídeo admitido por yt-dlp."
         )

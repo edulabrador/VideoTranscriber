@@ -176,8 +176,8 @@ def test_youtube_reuses_info_and_preserves_cookies(tmp_path, fake_ydl):
 @pytest.mark.parametrize("profile", ["compact", "balanced", "best"])
 def test_fallback_keeps_exact_format_selector(tmp_path, fake_ydl, profile, caplog):
     assert _YT_DLP_FORMATS == {
-        "compact": "bestaudio[abr<=64]/bestaudio",
-        "balanced": "bestaudio[abr<=128]/bestaudio",
+        "compact": "bestaudio[abr<=64]/bestaudio/best",
+        "balanced": "bestaudio[abr<=128]/bestaudio/best",
         "best": "bestaudio/best",
     }
     fake_ydl.info = metadata()
@@ -236,19 +236,38 @@ def test_download_errors_keep_existing_handling(tmp_path, fake_ydl, error, expec
         download_media(YOUTUBE_URL, tmp_path, None, threading.Event())
 
 
-def test_x_cobalt_fallback_and_tiktok_direct_route(tmp_path, fake_ydl):
+def test_yt_dlp_goes_first_and_cobalt_is_only_a_fallback(tmp_path, fake_ydl):
     cobalt_result = DownloadResult(tmp_path / "cobalt.mp3", "title", None, None)
     with patch("backend.core.downloader._download_with_cobalt", return_value=cobalt_result) as cobalt:
-        assert download_media(
+        direct = download_media(
             TIKTOK_URL, tmp_path, None, threading.Event(), cobalt_api_url="http://127.0.0.1:9000"
-        ) is cobalt_result
-        assert not fake_ydl.instances
+        )
+        assert direct.title == "A video"
+        cobalt.assert_not_called()
         fake_ydl.error = yt_dlp.utils.DownloadError("network failed")
-        assert download_media(
-            X_URL, tmp_path, None, threading.Event(), cobalt_api_url="http://127.0.0.1:9000"
-        ) is cobalt_result
+        for url, mode in ((TIKTOK_URL, "audio"), (X_URL, "auto")):
+            assert download_media(
+                url, tmp_path, None, threading.Event(), cobalt_api_url="http://127.0.0.1:9000"
+            ) is cobalt_result
+            assert cobalt.call_args.kwargs["download_mode"] == mode
         assert cobalt.call_count == 2
-        assert fake_ydl.instances[0].calls == [("extract", True)]
+
+
+def test_cobalt_failure_reports_the_original_download_error(tmp_path, fake_ydl):
+    fake_ydl.error = yt_dlp.utils.DownloadError("login required")
+    with patch(
+        "backend.core.downloader._download_with_cobalt",
+        side_effect=DownloadError("Cobalt no disponible"),
+    ):
+        with pytest.raises(PrivateContentError):
+            download_media(
+                X_URL, tmp_path, None, threading.Event(), cobalt_api_url="http://127.0.0.1:9000"
+            )
+
+
+def test_youtube_enables_a_javascript_runtime(tmp_path, fake_ydl):
+    download_media(YOUTUBE_URL, tmp_path, None, threading.Event())
+    assert {"deno", "node"} <= fake_ydl.instances[0].params["js_runtimes"].keys()
 
 
 @pytest.mark.skipif(not os.environ.get("VIDEO_TRANSCRIBER_LIVE_TEST"), reason="needs network")

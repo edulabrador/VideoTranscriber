@@ -19,6 +19,25 @@ from backend.core.model_manager import (
 
 ProgressCallback = Callable[[int, int | None], None]
 TranscriptionProfile = Literal["fast", "balanced", "precise"]
+TranscriptionTask = Literal["transcribe", "translate"]
+
+
+@dataclass(frozen=True)
+class TranscriptionOptions:
+    """Per-job choices that change the text, and therefore the cache key."""
+
+    language: str | None = None  # None lets Whisper detect it.
+    task: TranscriptionTask = "transcribe"
+    initial_prompt: str | None = None
+    word_timestamps: bool = False
+
+    def cache_fields(self) -> dict:
+        return {
+            "requested_language": self.language,
+            "task": self.task,
+            "initial_prompt": self.initial_prompt,
+            "word_timestamps": self.word_timestamps,
+        }
 
 
 @dataclass
@@ -53,6 +72,7 @@ class TranscriptionResult:
     audio_format_id: str | None = None
     audio_selection: Literal["original", "default"] | None = None
     timings: dict[str, float] = field(default_factory=dict)
+    options: TranscriptionOptions = field(default_factory=TranscriptionOptions)
 
     @property
     def word_count(self) -> int:
@@ -71,6 +91,22 @@ def resolve_profile_settings(
     return configured_model, configured_beam_size
 
 
+def resolve_job_model(
+    profile: TranscriptionProfile,
+    options: TranscriptionOptions,
+    configured_model: str,
+    configured_beam_size: int,
+    device: str,
+) -> tuple[str, int]:
+    """Model and beam size a job really uses. Shared with the cache lookup."""
+    model_size, beam_size = resolve_profile_settings(profile, configured_model, configured_beam_size)
+    model_size = resolve_model_size(model_size, device)
+    # The turbo checkpoints were not trained for translation; use full large-v3 instead.
+    if options.task == "translate" and "turbo" in model_size:
+        model_size = "large-v3"
+    return model_size, beam_size
+
+
 def transcribe_audio(
     audio_path: Path,
     model_size_preference: str,
@@ -82,15 +118,13 @@ def transcribe_audio(
     profile: TranscriptionProfile = "balanced",
     on_progress: ProgressCallback | None = None,
     on_status: Callable[[Literal["loading_model", "transcribing"], str], None] | None = None,
+    options: TranscriptionOptions | None = None,
 ) -> TranscriptionResult:
+    options = options or TranscriptionOptions()
     device = select_device(device_preference)
-    model_size_preference, beam_size = resolve_profile_settings(
-        profile,
-        model_size_preference,
-        beam_size,
+    model_size, beam_size = resolve_job_model(
+        profile, options, model_size_preference, beam_size, device,
     )
-
-    model_size = resolve_model_size(model_size_preference, device)
     compute_type = resolve_compute_type(compute_type_preference, device)
     batch_size = resolve_batch_size(batch_size, device, profile)
 
@@ -119,14 +153,19 @@ def transcribe_audio(
             on_status("transcribing", "Modelo listo. Analizando el audio...")
         analysis_started = time.perf_counter()
         transcriber = BatchedInferencePipeline(model=model) if device == "cuda" and batch_size > 1 else model
-        options = {
+        decode_options: dict = {
             "vad_filter": True,
-            "word_timestamps": False,
+            "word_timestamps": options.word_timestamps,
             "beam_size": beam_size,
+            "task": options.task,
         }
+        if options.language:
+            decode_options["language"] = options.language
+        if options.initial_prompt:
+            decode_options["initial_prompt"] = options.initial_prompt
         if isinstance(transcriber, BatchedInferencePipeline):
-            options["batch_size"] = batch_size
-        segment_iter, info = transcriber.transcribe(str(audio_path), **options)
+            decode_options["batch_size"] = batch_size
+        segment_iter, info = transcriber.transcribe(str(audio_path), **decode_options)
         audio_analysis_seconds = time.perf_counter() - analysis_started
 
         segments: list[TranscriptSegment] = []
@@ -179,4 +218,5 @@ def transcribe_audio(
             "audio_analysis": audio_analysis_seconds,
             "transcription": transcription_seconds,
         },
+        options=options,
     )

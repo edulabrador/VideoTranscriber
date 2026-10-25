@@ -23,11 +23,16 @@ _NON_ORIGINAL_NOTE = re.compile(r"\b(?:dubbed|dub|descriptive|description|audiod
 AudioQuality = Literal["compact", "balanced", "best"]
 _AUDIO_BITRATES = {"compact": "64", "balanced": "128", "best": "320"}
 _AUDIO_LIMITS = {"compact": 64, "balanced": 128}
+# Every selector ends in "best" so sites that only serve combined audio and video
+# (some Instagram posts, for example) still download instead of failing.
 _YT_DLP_FORMATS = {
-    "compact": "bestaudio[abr<=64]/bestaudio",
-    "balanced": "bestaudio[abr<=128]/bestaudio",
+    "compact": "bestaudio[abr<=64]/bestaudio/best",
+    "balanced": "bestaudio[abr<=128]/bestaudio/best",
     "best": "bestaudio/best",
 }
+# YouTube needs a JavaScript runtime to unlock its full format list. Deno is
+# yt-dlp's default; Node is already a requirement of this project, so enable both.
+_JS_RUNTIMES: dict[str, dict] = {"deno": {}, "node": {}}
 
 
 @dataclass
@@ -113,16 +118,6 @@ def download_media(
 ) -> DownloadResult:
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    if validators.is_tiktok_url(url) and cobalt_api_url:
-        return _download_with_cobalt(
-            url,
-            dest_dir,
-            cobalt_api_url,
-            cancel_event,
-            on_progress,
-            audio_quality,
-        )
-
     audio_language = None
     audio_format_id = None
     audio_selection: Literal["original", "default"] = "default"
@@ -147,6 +142,7 @@ def download_media(
         "no_warnings": True,
         "noplaylist": True,
         "ignoreconfig": True,
+        "js_runtimes": _JS_RUNTIMES,
     }
     if cookies_file is not None:
         ydl_opts["cookiefile"] = str(cookies_file)
@@ -190,16 +186,21 @@ def download_media(
     except _CancelledSentinel as exc:
         raise JobCancelledError() from exc
     except yt_dlp.utils.DownloadError as exc:
-        if validators.is_x_url(url) and cobalt_api_url:
-            return _download_with_cobalt(
-                url,
-                dest_dir,
-                cobalt_api_url,
-                cancel_event,
-                on_progress,
-                audio_quality,
-                download_mode="auto",
-            )
+        if validators.is_cobalt_url(url) and cobalt_api_url:
+            # yt-dlp goes first; the optional local Cobalt service is only a fallback.
+            _LOGGER.info("yt-dlp no pudo descargar %s, se prueba con Cobalt: %s", url, exc)
+            try:
+                return _download_with_cobalt(
+                    url,
+                    dest_dir,
+                    cobalt_api_url,
+                    cancel_event,
+                    on_progress,
+                    audio_quality,
+                    download_mode="audio" if validators.is_tiktok_url(url) else "auto",
+                )
+            except DownloadError as cobalt_exc:
+                _LOGGER.warning("Cobalt tampoco pudo descargar %s: %s", url, cobalt_exc.message)
         message = str(exc)
         lowered = message.lower()
         if any(signal in lowered for signal in _PRIVATE_SIGNALS):

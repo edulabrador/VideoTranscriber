@@ -195,7 +195,7 @@ def test_pipeline_persists_original_audio_and_stages(tmp_path, monkeypatch, stor
         tmp_path / "audio.webm", "Vídeo", None, 3, "es", "251-es", "original",
     ))
 
-    def infer(*args):
+    def infer(*args, **_kwargs):
         args[-1]("loading_model", "Cargando modelo")
         args[-1]("transcribing", "Analizando audio")
         args[-2](50, 1)
@@ -264,7 +264,7 @@ def test_file_pipeline_passes_cancel_and_timeout_and_records_preparation(
     monkeypatch.setattr(pipeline, "history_store", store)
     prepare = Mock(return_value=tmp_path / "audio.wav")
     monkeypatch.setattr(pipeline, "normalize_to_wav16k_mono", prepare)
-    monkeypatch.setattr(pipeline, "transcribe_audio", lambda *_: result)
+    monkeypatch.setattr(pipeline, "transcribe_audio", lambda *_, **__: result)
     event = threading.Event()
     measured = pipeline.run_pipeline(
         "job_file", pipeline.FileSource(tmp_path / "input.mp4", "input.mp4"),

@@ -2,6 +2,7 @@ import shutil
 import threading
 import time
 import logging
+from collections import deque
 from math import ceil
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -13,14 +14,89 @@ from backend.core import downloader, validators
 from backend.core.audio import normalize_to_wav16k_mono
 from backend.core.downloader import AudioQuality
 from backend.core.errors import JobCancelledError, TranscriberError
-from backend.core.exporter import write_json, write_srt, write_txt
+from backend.core.exporter import write_all
 from backend.core.history import HistoryItem, history_store
 from backend.core.job_manager import JobStatus
-from backend.core.transcriber import TranscriptionProfile, TranscriptionResult, transcribe_audio
+from backend.core.model_manager import model_cache
+from backend.core.transcriber import (
+    TranscriptionOptions,
+    TranscriptionProfile,
+    TranscriptionResult,
+    transcribe_audio,
+)
 
 StageCallback = Callable[[JobStatus, str, int | None], None]
-_TRANSCRIPTION_LOCK = threading.Lock()
 logger = logging.getLogger(__name__)
+
+
+class TranscriptionTurns:
+    """First-come, first-served access to the single transcription slot."""
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._waiting: deque[object] = deque()
+        self._running = False
+
+    def acquire(
+        self, cancel_event: threading.Event, on_position: Callable[[int], None],
+    ) -> None:
+        ticket = object()
+        with self._condition:
+            self._waiting.append(ticket)
+        last_position = None
+        try:
+            while True:
+                with self._condition:
+                    if self._waiting[0] is ticket and not self._running:
+                        self._waiting.popleft()
+                        self._running = True
+                        return
+                    # Jobs ahead of this one, counting the one being transcribed.
+                    position = self._waiting.index(ticket) + int(self._running)
+                if position != last_position:
+                    on_position(position)
+                    last_position = position
+                if cancel_event.is_set():
+                    raise JobCancelledError()
+                with self._condition:
+                    self._condition.wait(0.25)
+        except BaseException:
+            with self._condition:
+                if ticket in self._waiting:
+                    self._waiting.remove(ticket)
+                self._condition.notify_all()
+            raise
+
+    def try_acquire_idle(self) -> bool:
+        with self._condition:
+            if self._running or self._waiting:
+                return False
+            self._running = True
+            return True
+
+    def release(self) -> None:
+        with self._condition:
+            self._running = False
+            self._condition.notify_all()
+
+
+_TURNS = TranscriptionTurns()
+
+
+def release_idle_models() -> bool:
+    """Free cached models after the configured idle time. True when memory was freed."""
+    idle_limit = settings.model_idle_unload_seconds
+    if not idle_limit or model_cache.idle_seconds() < idle_limit:
+        return False
+    if not _TURNS.try_acquire_idle():
+        return False
+    try:
+        freed = model_cache.clear()
+    finally:
+        _TURNS.release()
+    if freed:
+        logger.info("Modelos liberados tras %.0f s sin uso", idle_limit)
+    return freed
 
 
 @dataclass
@@ -50,7 +126,10 @@ def run_pipeline(
     output_dir: Path | None = None,
     profile: TranscriptionProfile = "balanced",
     audio_quality: AudioQuality = "balanced",
+    options: TranscriptionOptions | None = None,
+    record_history: bool = True,
 ) -> TranscriptionResult:
+    options = options or TranscriptionOptions()
     cancel_event = cancel_event or threading.Event()
     output_dir = output_dir or (settings.output_dir / job_id)
     job_temp_dir = settings.temp_dir / job_id
@@ -62,7 +141,7 @@ def run_pipeline(
         if cancel_event.is_set():
             raise JobCancelledError()
         if isinstance(source, URLSource):
-            validators.validate_instagram_url(source.url)
+            validators.validate_supported_url(source.url)
 
             on_stage("downloading", "Consultando el vídeo y las pistas de audio...", 1)
 
@@ -105,9 +184,13 @@ def run_pipeline(
 
         queue_started = time.perf_counter()
         on_stage("queued", f"En cola. Esperando turno de procesamiento. {audio_label}", transcription_start)
-        while not _TRANSCRIPTION_LOCK.acquire(timeout=0.25):
-            if cancel_event.is_set():
-                raise JobCancelledError()
+
+        def report_position(ahead: int) -> None:
+            if ahead:
+                waiting = "1 trabajo" if ahead == 1 else f"{ahead} trabajos"
+                on_stage("queued", f"En cola: {waiting} por delante. {audio_label}", transcription_start)
+
+        _TURNS.acquire(cancel_event, report_position)
 
         def report_transcription(percent: int, eta_seconds: int | None) -> None:
             overall = transcription_start + round(percent * (98 - transcription_start) / 100)
@@ -140,41 +223,42 @@ def run_pipeline(
                 lambda status, message: on_stage(
                     status, f"{message} {audio_label}", transcription_start
                 ),
+                options=options,
             )
             if isinstance(source, URLSource):
                 result.audio_language = download_result.audio_language
                 result.audio_format_id = download_result.audio_format_id
                 result.audio_selection = download_result.audio_selection
         finally:
-            _TRANSCRIPTION_LOCK.release()
+            model_cache.touch()
+            _TURNS.release()
 
         on_stage("exporting", "Preparando los archivos...", 99)
         result.timings.update(timings)
         created_at = datetime.now(timezone.utc).isoformat()
-        write_txt(result, output_dir / "transcript.txt")
-        write_srt(result, output_dir / "subtitles.srt")
         result.timings["processing_total"] = time.perf_counter() - started_at
-        write_json(
+        write_all(
             result,
-            output_dir / "transcript.json",
+            output_dir,
             source=source_label,
             title=title,
             created_at=created_at,
             audio_quality=audio_quality,
         )
 
-        history_store.add_entry(
-            HistoryItem(
-                id=job_id,
-                source_type=source_type,
-                source=source_label,
-                title=title,
-                created_at=created_at,
-                duration=result.duration,
-                word_count=result.word_count,
-                language=result.language,
+        if record_history:
+            history_store.add_entry(
+                HistoryItem(
+                    id=job_id,
+                    source_type=source_type,
+                    source=source_label,
+                    title=title,
+                    created_at=created_at,
+                    duration=result.duration,
+                    word_count=result.word_count,
+                    language=result.language,
+                )
             )
-        )
         logger.info("Job %s timings (seconds): %s", job_id, result.timings)
 
         on_stage("completed", "Transcripción completada.", 100)
