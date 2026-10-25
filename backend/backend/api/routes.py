@@ -296,6 +296,7 @@ async def get_job_result(job_id: str) -> TranscriptResultSchema:
         audio_format_id=result.audio_format_id,
         audio_selection=result.audio_selection,
         timings=result.timings,
+        source=result.source,
         **result.options.cache_fields(),
     )
 

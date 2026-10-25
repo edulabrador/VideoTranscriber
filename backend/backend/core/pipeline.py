@@ -235,6 +235,7 @@ def run_pipeline(
 
         on_stage("exporting", "Preparando los archivos...", 99)
         result.timings.update(timings)
+        result.source = source_label
         created_at = datetime.now(timezone.utc).isoformat()
         result.timings["processing_total"] = time.perf_counter() - started_at
         write_all(

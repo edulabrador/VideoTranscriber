@@ -4,7 +4,9 @@ import { Icon } from "./Icon";
 
 const FORMATS: { fmt: ExportFormat; label: string }[] = [
   { fmt: "txt", label: "Descargar TXT" },
-  { fmt: "srt", label: "Descargar SRT" },
+  { fmt: "md", label: "Descargar Markdown con tiempos" },
+  { fmt: "srt", label: "Descargar subtítulos SRT" },
+  { fmt: "vtt", label: "Descargar subtítulos VTT" },
   { fmt: "json", label: "Descargar JSON" },
 ];
 

@@ -10,15 +10,16 @@ backend/backend/
   api/                       FastAPI app, routes, Pydantic schemas
   core/
     errors.py                Typed exception hierarchy
-    validators.py             Supported social-video URL validation
-    downloader.py             yt-dlp wrapper
+    validators.py             Known platforms + any single-video yt-dlp extractor
+    downloader.py             yt-dlp wrapper, Cobalt as fallback for TikTok/X
     audio.py                  ffmpeg wrapper (normalize, probe, availability)
-    model_manager.py          hardware detection + model caching
+    model_manager.py          hardware detection + ModelCache (parks models in RAM)
     transcriber.py            faster-whisper wrapper
-    exporter.py                txt/srt/json writers (single source of formatting)
+    exporter.py                txt/md/srt/vtt/json writers (single source of formatting)
     history.py                 recent-history JSON store
     job_manager.py             in-memory job registry + cancellation
-    pipeline.py                 shared orchestration, used by both API and CLI
+    pipeline.py                 shared orchestration, FIFO transcription turns,
+                                idle model release; used by both API and CLI
 models/  output/  temp/       gitignored runtime data
 ```
 
@@ -56,11 +57,29 @@ records as `cancelled`.
 ## Adding a new export format
 
 Add a writer function to `backend/backend/core/exporter.py` (mirroring
-`write_txt`/`write_srt`/`write_json`), call it from `pipeline.py`'s export
-stage, add the extension to `_ALLOWED_EXPORT_FORMATS` in
+`write_txt`/`write_srt`/`write_json`), call it from `write_all` in the same
+file, add the extension to `_ALLOWED_EXPORT_FORMATS` in
 `backend/backend/api/routes.py`, and add an entry to the `FORMATS` array in
 `apps/web/src/components/ExportMenu.tsx`. Do not duplicate formatting logic
 in the frontend — it only downloads what the backend already wrote.
+
+## Transcription options and the cache
+
+`TranscriptionOptions` (language, task, initial prompt, word timestamps) travels
+from the API or CLI through `pipeline.py` to faster-whisper and is stored in
+`transcript.json`. `HistoryStore.find_cached` only reuses a result whose options,
+model and beam size match; add any new option to `cache_fields()` so it becomes
+part of that comparison. `resolve_job_model` is shared by the transcriber and the
+cache lookup, so both always agree on the model a job uses.
+
+## Queue and models
+
+Jobs download in parallel but transcribe one at a time. `TranscriptionTurns`
+grants the slot in arrival order and reports how many jobs are ahead.
+`ModelCache` keeps up to `MAX_CACHED_MODELS`; on CUDA the inactive ones are moved
+to RAM with CTranslate2's `unload_model(to_cpu=True)`. A background task in
+`app.py` calls `release_idle_models()` every 30 s, which frees them after
+`MODEL_IDLE_UNLOAD_SECONDS` only when no job holds or waits for the slot.
 
 ## Lint / typecheck
 

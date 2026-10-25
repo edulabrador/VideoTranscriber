@@ -1,16 +1,46 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
+import { AdvancedOptions } from "./components/AdvancedOptions";
 import { FileDropZone } from "./components/FileDropZone";
 import { HistoryList } from "./components/HistoryList";
 import { Icon } from "./components/Icon";
+import { JobQueue } from "./components/JobQueue";
 import { ProgressIndicator } from "./components/ProgressIndicator";
 import { TranscriptView } from "./components/TranscriptView";
 import { UrlInputForm } from "./components/UrlInputForm";
 import { JobProvider, useJobContext } from "./context/JobContext";
 import { useJobPolling } from "./hooks/useJobPolling";
-import type { AudioQuality, TranscriptionProfile } from "./api/types";
+import { DEFAULT_OPTIONS } from "./api/types";
+import type {
+  AudioQuality,
+  TranscriptionOptions,
+  TranscriptionProfile,
+} from "./api/types";
 
 type InputMode = "url" | "file";
+
+const OPTIONS_STORAGE_KEY = "transcription-options";
+
+function loadOptions(): TranscriptionOptions {
+  try {
+    const saved = JSON.parse(localStorage.getItem(OPTIONS_STORAGE_KEY) ?? "{}");
+    return {
+      language:
+        typeof saved.language === "string" &&
+        /^[a-z]{2,3}$/.test(saved.language)
+          ? saved.language
+          : null,
+      task: saved.task === "translate" ? "translate" : "transcribe",
+      initial_prompt:
+        typeof saved.initial_prompt === "string"
+          ? saved.initial_prompt.slice(0, 500) || null
+          : null,
+      word_timestamps: saved.word_timestamps === true,
+    };
+  } catch {
+    return DEFAULT_OPTIONS;
+  }
+}
 
 function DarkModeToggle() {
   const [dark, setDark] = useState(() =>
@@ -50,6 +80,20 @@ function TranscriberPanel() {
     const saved = localStorage.getItem("audio-quality");
     return saved === "compact" || saved === "best" ? saved : "balanced";
   });
+  const [options, setOptions] = useState<TranscriptionOptions>(loadOptions);
+  const [queueRevision, setQueueRevision] = useState(0);
+  const onQueued = useCallback(
+    () => setQueueRevision((value) => value + 1),
+    [],
+  );
+  const changeOptions = (next: TranscriptionOptions) => {
+    setOptions(next);
+    try {
+      localStorage.setItem(OPTIONS_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      /* Optional preference. */
+    }
+  };
   useJobPolling();
 
   const preferences = (
@@ -101,6 +145,9 @@ function TranscriberPanel() {
         </label>
       )}
     </div>
+  );
+  const advanced = (
+    <AdvancedOptions options={options} onChange={changeOptions} />
   );
 
   return (
@@ -165,13 +212,24 @@ function TranscriberPanel() {
             aria-labelledby={`source-${mode}`}
           >
             {mode === "url" ? (
-              <UrlInputForm profile={profile} audioQuality={audioQuality}>
+              <UrlInputForm
+                profile={profile}
+                audioQuality={audioQuality}
+                options={options}
+                onQueued={onQueued}
+              >
                 {preferences}
+                {advanced}
               </UrlInputForm>
             ) : (
               <div className="file-source">
                 {preferences}
-                <FileDropZone profile={profile} />
+                {advanced}
+                <FileDropZone
+                  profile={profile}
+                  options={options}
+                  onQueued={onQueued}
+                />
               </div>
             )}
           </div>
@@ -182,9 +240,11 @@ function TranscriberPanel() {
               <span>Instagram</span>
               <span>TikTok</span>
               <span>X / Twitter</span>
+              <span>y más</span>
             </div>
           </div>
         </section>
+        <JobQueue revision={queueRevision} />
         <ProgressIndicator />
         {state.result && state.jobId ? (
           <TranscriptView jobId={state.jobId} result={state.result} />
@@ -206,7 +266,9 @@ function TranscriberPanel() {
                 <p>Transcribe, copia y llévatelo a donde lo necesites.</p>
                 <div className="format-tags">
                   <span>TXT</span>
+                  <span>MD</span>
                   <span>SRT</span>
+                  <span>VTT</span>
                   <span>JSON</span>
                 </div>
               </div>

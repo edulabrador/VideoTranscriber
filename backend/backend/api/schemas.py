@@ -86,6 +86,7 @@ class TranscriptResultSchema(BaseModel):
     task: Literal["transcribe", "translate"] = "transcribe"
     initial_prompt: str | None = None
     word_timestamps: bool = False
+    source: str = ""
 
 
 class HistoryItemSchema(BaseModel):

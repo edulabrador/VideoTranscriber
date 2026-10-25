@@ -4,46 +4,89 @@ import { useDropzone } from "react-dropzone";
 import { postForm } from "../api/client";
 import { isTerminalStatus } from "../api/types";
 import { useJobContext } from "../context/JobContext";
-import type { JobResponse, TranscriptionProfile } from "../api/types";
+import type {
+  JobResponse,
+  TranscriptionOptions,
+  TranscriptionProfile,
+} from "../api/types";
 import { Icon } from "./Icon";
 
-export function FileDropZone({ profile }: { profile: TranscriptionProfile }) {
+// Browsers do not always know the MIME type of these, so accept them by extension too.
+const MEDIA_EXTENSIONS = [
+  ".aac",
+  ".flac",
+  ".m4a",
+  ".mka",
+  ".mkv",
+  ".mov",
+  ".mp3",
+  ".mp4",
+  ".oga",
+  ".ogg",
+  ".opus",
+  ".ts",
+  ".wav",
+  ".weba",
+  ".webm",
+  ".wma",
+  ".wmv",
+  ".3gp",
+];
+
+export function FileDropZone({
+  profile,
+  options,
+  onQueued,
+}: {
+  profile: TranscriptionProfile;
+  options: TranscriptionOptions;
+  onQueued: () => void;
+}) {
   const { state, dispatch } = useJobContext();
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const jobActive = Boolean(state.status && !isTerminalStatus(state.status));
-  const disabled = jobActive || uploading;
+  const disabled = uploading;
 
   const onDrop = useCallback(
     async (accepted: File[]) => {
-      const file = accepted[0];
-      if (!file) return;
+      if (!accepted.length) return;
       setError(null);
       setUploading(true);
-      const form = new FormData();
-      form.append("file", file);
-      form.append("profile", profile);
-      try {
-        const job = await postForm<JobResponse>("/api/jobs/upload", form);
-        dispatch({ type: "START_JOB", jobId: job.id });
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "No se pudo subir el archivo",
-        );
-      } finally {
-        setUploading(false);
+      const failures: string[] = [];
+      let first: string | null = null;
+      for (const file of accepted) {
+        const form = new FormData();
+        form.append("file", file);
+        form.append("profile", profile);
+        form.append("task", options.task);
+        form.append("word_timestamps", String(options.word_timestamps));
+        if (options.language) form.append("language", options.language);
+        if (options.initial_prompt)
+          form.append("initial_prompt", options.initial_prompt);
+        try {
+          const job = await postForm<JobResponse>("/api/jobs/upload", form);
+          first ??= job.id;
+        } catch (err) {
+          failures.push(
+            `${file.name}: ${err instanceof Error ? err.message : "no se pudo subir"}`,
+          );
+        }
       }
+      setUploading(false);
+      onQueued();
+      if (first && !jobActive) dispatch({ type: "START_JOB", jobId: first });
+      if (failures.length) setError(failures.join("\n"));
     },
-    [dispatch, profile],
+    [dispatch, profile, options, onQueued, jobActive],
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { "audio/*": [], "video/*": [] },
-    multiple: false,
+    accept: { "audio/*": MEDIA_EXTENSIONS, "video/*": MEDIA_EXTENSIONS },
+    multiple: true,
     disabled,
-    onDropRejected: () =>
-      setError("Selecciona un único archivo de audio o vídeo."),
+    onDropRejected: () => setError("Selecciona archivos de audio o vídeo."),
   });
 
   return (
@@ -64,13 +107,13 @@ export function FileDropZone({ profile }: { profile: TranscriptionProfile }) {
           {uploading
             ? "Subiendo archivo..."
             : jobActive
-              ? "Ya hay una transcripción en curso"
+              ? "Arrastra más archivos para añadirlos a la cola"
               : isDragActive
                 ? "Suéltalo. Nosotros nos encargamos."
                 : "Arrastra tu archivo hasta aquí"}
         </h3>
         <p>
-          {disabled ? (
+          {uploading ? (
             "Tu archivo está en buenas manos."
           ) : (
             <>
@@ -81,7 +124,11 @@ export function FileDropZone({ profile }: { profile: TranscriptionProfile }) {
         <small>Audio y vídeo · procesamiento local</small>
       </div>
       {error && (
-        <p role="alert" className="message error" style={{ marginTop: 12 }}>
+        <p
+          role="alert"
+          className="message error"
+          style={{ marginTop: 12, whiteSpace: "pre-line" }}
+        >
           {error}
         </p>
       )}

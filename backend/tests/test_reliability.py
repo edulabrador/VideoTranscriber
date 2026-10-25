@@ -121,7 +121,9 @@ def test_results_recover_after_backend_restart(client, store, result):
     save_result(store, result)
     assert routes.job_manager.get_job("job_saved") is None
     assert client.get("/api/jobs/job_saved").json()["status"] == "completed"
-    assert client.get("/api/jobs/job_saved/result").json()["text"] == result.text
+    restored = client.get("/api/jobs/job_saved/result").json()
+    assert restored["text"] == result.text
+    assert restored["source"] == "https://youtu.be/video123"
     assert client.get("/api/jobs/job_missing").status_code == 404
 
 

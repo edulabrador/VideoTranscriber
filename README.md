@@ -16,17 +16,27 @@ ejecuta localmente. No necesita claves de API ni una suscripción.
 
 ## Funciones
 
-- Enlaces de YouTube, Instagram, TikTok, X y Twitter.
+- Enlaces de YouTube, Instagram, TikTok, X y Twitter, y de cualquier otro sitio de
+  vídeo admitido por yt-dlp (Vimeo, Twitch, Dailymotion, SoundCloud...).
+- Varios enlaces o archivos a la vez: se procesan en una cola por orden de llegada
+  que muestra cuántos trabajos hay por delante.
 - Archivos locales de audio y vídeo.
 - Aceleración mediante GPU NVIDIA CUDA, con retorno a CPU cuando corresponda.
 - Perfiles Rápido, Equilibrado y Preciso para elegir entre velocidad y exactitud.
 - Calidad de descarga configurable para reducir tiempo y consumo de red.
 - Ajuste automático y conservador del tamaño de lote según la VRAM disponible.
 - Cola de una sola transcripción GPU para evitar saturar la memoria gráfica.
+- Los modelos recientes se mantienen cargados para cambiar de perfil sin esperar
+  y se liberan tras 15 minutos sin uso.
+- Opciones avanzadas: idioma del audio, vocabulario (nombres propios, siglas),
+  traducción al inglés y marcas de tiempo por palabra.
 - Reutilización inmediata de transcripciones anteriores para el mismo enlace y perfil.
 - Progreso basado en bytes descargados y segundos de audio procesados.
 - Estimación del tiempo restante y cancelación de trabajos.
-- Exportación a TXT, SRT y JSON.
+- Exportación a TXT por párrafos, Markdown con tiempos, subtítulos SRT y VTT
+  legibles (máximo dos líneas de 42 caracteres y 6 segundos) y JSON.
+- En vídeos de YouTube, cada marca de tiempo abre el vídeo en ese momento.
+- Los trabajos fallidos quedan en el historial con su error y se pueden reintentar.
 - Historial local. Las dos últimas entradas permiten desplegar el texto completo.
 - Búsqueda en todos los textos del historial y apertura de resultados antiguos.
 - Recuperación del último trabajo al recargar la página y avisos de desconexión.
@@ -97,6 +107,9 @@ También existe una interfaz de terminal:
 
 ```powershell
 uv run --project backend transcriber "https://www.instagram.com/reel/XXXXX/"
+uv run --project backend transcriber video.mp4 --profile precise --language es --prompt "Kubernetes, OpenAI"
+uv run --project backend transcriber --clean-orphans        # lista carpetas de output/ sin historial
+uv run --project backend transcriber --clean-orphans --yes  # y las borra
 ```
 
 ## ¿Se puede ejecutar directamente desde GitHub?
@@ -119,12 +132,14 @@ La configuración local está en `.env`. Este archivo nunca se sube a GitHub.
 | Variable | Valor habitual | Función |
 |---|---|---|
 | `COOKIES_FILE` | vacío | Archivo `cookies.txt` para publicaciones que exigen sesión |
-| `COBALT_API_URL` | `http://127.0.0.1:9187` | Descargador local para TikTok y rutas alternativas |
+| `COBALT_API_URL` | `http://127.0.0.1:9187` | Descargador local opcional. Solo se usa si yt-dlp falla con TikTok o X |
 | `MODEL_SIZE` | `auto` | Modelo de faster-whisper |
 | `DEVICE` | `auto` | Selección entre `cuda` y `cpu` |
 | `COMPUTE_TYPE` | `auto` | Precisión de cálculo |
 | `BATCH_SIZE` | `0` | `0` ajusta los lotes automáticamente según la VRAM |
 | `BEAM_SIZE` | `1` | Prioriza velocidad. `5` puede mejorar precisión y tarda más |
+| `MAX_CACHED_MODELS` | `2` | Modelos que se conservan entre trabajos. En CUDA solo el activo ocupa VRAM |
+| `MODEL_IDLE_UNLOAD_SECONDS` | `900` | Libera los modelos tras ese tiempo sin uso. `0` los mantiene |
 
 La configuración optimizada de este ordenador está guardada únicamente en su `.env`
 local. El repositorio mantiene valores automáticos compatibles con otros equipos.
@@ -234,8 +249,8 @@ los tiempos de su procesamiento original, no mide el acceso a la caché.
 
 `audio_analysis` mide la llamada inicial al motor. `transcription` mide el consumo
 de sus segmentos, incluida cualquier decodificación diferida por el motor.
-`processing_total` va desde el inicio del procesamiento hasta antes de escribir el
-JSON y el historial. No incluye la subida inicial ni la limpieza final.
+`processing_total` va desde el inicio del procesamiento hasta antes de escribir los
+archivos de exportación y el historial. No incluye la subida inicial ni la limpieza final.
 
 La preparación de archivos admite cancelación y tiene un máximo de 600 segundos,
 ajustable con `AUDIO_PREPARATION_TIMEOUT_SECONDS`. Se mantiene la normalización a
@@ -257,7 +272,7 @@ La documentación técnica adicional está en [docs/DEV_GUIDE.md](docs/DEV_GUIDE
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper), reconocimiento de voz.
 - [CTranslate2](https://github.com/OpenNMT/CTranslate2), ejecución optimizada en CPU y CUDA.
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp), descarga de medios.
-- [Cobalt](https://github.com/imputnet/cobalt), descarga local de TikTok y rutas alternativas. Se instala como proyecto separado y conserva su licencia AGPL-3.0.
+- [Cobalt](https://github.com/imputnet/cobalt), descarga local alternativa para TikTok y X cuando yt-dlp falla. Se instala como proyecto separado y conserva su licencia AGPL-3.0.
 - [PyAV](https://github.com/PyAV-Org/PyAV), lectura de audio y vídeo.
 
 El código propio de VideoTranscriber utiliza la licencia [MIT](LICENSE).
@@ -273,4 +288,4 @@ El [aviso de `braces`](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) fue re
 
 ### Acceso a los datos
 
-El backend mantiene el acceso de propietario en loopback. Comprueba la dirección del cliente, Host y Origin, y rechaza los encabezados de reenvío detectables. La interfaz y las llamadas locales habituales conservan su funcionamiento. Las peticiones remotas directas al historial, las transcripciones o las descargas se rechazan. Un túnel TCP que oculte el origen puede parecer un cliente local. Para compartir una instancia debe diseñarse una capa de autenticación explícita; no se debe ocultar el origen remoto detrás de un proxy local.
+El backend solo atiende a este ordenador. Comprueba la dirección del cliente, Host y Origin, y rechaza los encabezados de reenvío detectables. La interfaz y las llamadas locales habituales conservan su funcionamiento. Las peticiones remotas directas al historial, las transcripciones o las descargas se rechazan. Un túnel TCP que oculte el origen puede parecer un cliente local. Para compartir una instancia debe diseñarse una capa de autenticación explícita; no se debe ocultar el origen remoto detrás de un proxy local.

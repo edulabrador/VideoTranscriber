@@ -246,6 +246,7 @@ def result_from_payload(payload: dict) -> TranscriptionResult:
         audio_format_id=payload.get("audio_format_id"),
         audio_selection=payload.get("audio_selection"),
         timings=payload.get("timings", {}),
+        source=payload.get("source", ""),
         options=TranscriptionOptions(
             language=payload.get("requested_language"),
             task=payload.get("task", "transcribe"),

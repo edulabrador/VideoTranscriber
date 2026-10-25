@@ -73,6 +73,7 @@ class TranscriptionResult:
     audio_selection: Literal["original", "default"] | None = None
     timings: dict[str, float] = field(default_factory=dict)
     options: TranscriptionOptions = field(default_factory=TranscriptionOptions)
+    source: str = ""  # Link or file name, filled in by the pipeline.
 
     @property
     def word_count(self) -> int:
