@@ -81,6 +81,7 @@ class TranscriptionTurns:
 
 
 _TURNS = TranscriptionTurns()
+_DIARIZATION_TURNS = TranscriptionTurns()
 
 
 def release_idle_models() -> bool:
@@ -234,7 +235,26 @@ def run_pipeline(
                 result.audio_language = download_result.audio_language
                 result.audio_format_id = download_result.audio_format_id
                 result.audio_selection = download_result.audio_selection
-            if options.diarize and result.segments:
+        finally:
+            model_cache.touch()
+            _TURNS.release()
+
+        if options.diarize and result.segments:
+            # Speaker identification runs on the CPU. After a GPU transcription it takes its
+            # own turn, leaving the GPU free for the next job; after a CPU transcription it
+            # shares the transcription slot so both never compete for the same cores.
+            diarization_turns = _DIARIZATION_TURNS if result.device == "cuda" else _TURNS
+
+            def report_diarization_position(ahead: int) -> None:
+                if ahead:
+                    on_stage(
+                        "diarizing",
+                        "Transcripción lista. Esperando para identificar hablantes...",
+                        transcription_end,
+                    )
+
+            diarization_turns.acquire(cancel_event, report_diarization_position)
+            try:
                 diarization_started = time.perf_counter()
                 on_stage(
                     "diarizing",
@@ -253,9 +273,8 @@ def run_pipeline(
                 )
                 result.segments = diarizer.assign_speakers(result.segments, turns)
                 result.timings["diarization"] = time.perf_counter() - diarization_started
-        finally:
-            model_cache.touch()
-            _TURNS.release()
+            finally:
+                diarization_turns.release()
 
         on_stage("exporting", "Preparando los archivos...", 99)
         result.timings.update(timings)

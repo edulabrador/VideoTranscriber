@@ -233,3 +233,48 @@ def test_real_four_speaker_recording(tmp_path, monkeypatch):
     )
     turns = diarizer.diarize(audio, 4, threading.Event())
     assert len({turn.speaker for turn in turns}) == 4
+
+
+@pytest.mark.parametrize("device,overlaps", [("cuda", True), ("cpu", False)])
+def test_gpu_jobs_transcribe_while_another_job_identifies_speakers(
+    tmp_path, monkeypatch, store, device, overlaps,
+):
+    """After a GPU transcription, diarization must not hold the transcription slot."""
+    monkeypatch.setattr(pipeline, "history_store", store)
+    monkeypatch.setattr(pipeline, "_TURNS", pipeline.TranscriptionTurns())
+    monkeypatch.setattr(pipeline, "_DIARIZATION_TURNS", pipeline.TranscriptionTurns())
+    monkeypatch.setattr(pipeline, "normalize_to_wav16k_mono", lambda *a, **k: tmp_path / "a.wav")
+    diarizing = threading.Event()
+    release_diarization = threading.Event()
+    second_transcribed = threading.Event()
+
+    def transcribe(*_args, **_kwargs):
+        if diarizing.is_set():
+            second_transcribed.set()
+        result = result_with([TranscriptSegment(0, 3, "Hola.")])
+        result.device = device
+        return result
+
+    def slow_diarize(*_args, **_kwargs):
+        diarizing.set()
+        release_diarization.wait(5)
+        return TURNS
+
+    monkeypatch.setattr(pipeline, "transcribe_audio", transcribe)
+    monkeypatch.setattr(diarizer, "diarize", slow_diarize)
+    monkeypatch.setattr(diarizer, "models_ready", lambda: True)
+    first = threading.Thread(target=pipeline.run_pipeline, args=(
+        "job_first", pipeline.FileSource(tmp_path / "a.mp4", "a.mp4")),
+        kwargs={"output_dir": store._output_dir / "job_first",
+                "options": TranscriptionOptions(diarize=True)})
+    first.start()
+    assert diarizing.wait(5)
+    second = threading.Thread(target=pipeline.run_pipeline, args=(
+        "job_second", pipeline.FileSource(tmp_path / "b.mp4", "b.mp4")),
+        kwargs={"output_dir": store._output_dir / "job_second"})
+    second.start()
+    assert second_transcribed.wait(1) is overlaps
+    release_diarization.set()
+    first.join(5)
+    second.join(5)
+    assert second_transcribed.is_set()
