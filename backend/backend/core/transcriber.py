@@ -30,6 +30,8 @@ class TranscriptionOptions:
     task: TranscriptionTask = "transcribe"
     initial_prompt: str | None = None
     word_timestamps: bool = False
+    diarize: bool = False
+    num_speakers: int | None = None  # None estimates the count; only used with diarize.
 
     def cache_fields(self) -> dict:
         return {
@@ -37,6 +39,8 @@ class TranscriptionOptions:
             "task": self.task,
             "initial_prompt": self.initial_prompt,
             "word_timestamps": self.word_timestamps,
+            "diarize": self.diarize,
+            "num_speakers": self.num_speakers if self.diarize else None,
         }
 
 
@@ -53,6 +57,7 @@ class TranscriptSegment:
     end: float
     text: str
     words: list[TranscriptWord] = field(default_factory=list)
+    speaker: str | None = None
 
 
 @dataclass

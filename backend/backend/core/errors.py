@@ -26,6 +26,10 @@ class TranscriptionError(TranscriberError):
     code = "transcription_failed"
 
 
+class DiarizationError(TranscriberError):
+    code = "diarization_failed"
+
+
 class JobCancelledError(TranscriberError):
     code = "cancelled"
 

@@ -15,6 +15,7 @@ backend/backend/
     audio.py                  ffmpeg wrapper (normalize, probe, availability)
     model_manager.py          hardware detection + ModelCache (parks models in RAM)
     transcriber.py            faster-whisper wrapper
+    diarizer.py               speaker diarization (sherpa-onnx) + speaker assignment
     exporter.py                txt/md/srt/vtt/json writers (single source of formatting)
     history.py                 recent-history JSON store
     job_manager.py             in-memory job registry + cancellation
@@ -80,6 +81,17 @@ grants the slot in arrival order and reports how many jobs are ahead.
 to RAM with CTranslate2's `unload_model(to_cpu=True)`. A background task in
 `app.py` calls `release_idle_models()` every 30 s, which frees them after
 `MODEL_IDLE_UNLOAD_SECONDS` only when no job holds or waits for the slot.
+
+## Speaker diarization
+
+`diarizer.diarize` downloads two ONNX models on first use (pinned SHA-256, only the
+model file is read from the tarball), decodes the audio at 16 kHz and returns speaker
+turns. Cancellation raises from the sherpa-onnx progress callback, which aborts the
+native loop. `assign_speakers` gives each segment the speaker it overlaps most; with
+word timestamps it labels each word and splits segments where the speaker changes.
+The pipeline runs it inside the transcription turn, after Whisper, as the
+`diarizing` stage. Set `VIDEO_TRANSCRIBER_LIVE_TEST=1` to run the test that
+downloads the models and a real four-speaker recording.
 
 ## Lint / typecheck
 

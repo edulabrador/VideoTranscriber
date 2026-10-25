@@ -15,6 +15,8 @@ class TranscriptionOptionsSchema(BaseModel):
     task: Literal["transcribe", "translate"] = "transcribe"
     initial_prompt: InitialPrompt | None = None
     word_timestamps: bool = False
+    diarize: bool = False
+    num_speakers: Annotated[int, Field(ge=1, le=20)] | None = None
 
     def to_options(self) -> TranscriptionOptions:
         return TranscriptionOptions(
@@ -22,6 +24,8 @@ class TranscriptionOptionsSchema(BaseModel):
             task=self.task,
             initial_prompt=(self.initial_prompt or "").strip() or None,
             word_timestamps=self.word_timestamps,
+            diarize=self.diarize,
+            num_speakers=self.num_speakers if self.diarize else None,
         )
 
 
@@ -64,6 +68,7 @@ class TranscriptSegmentSchema(BaseModel):
     end: float
     text: str
     words: list[TranscriptWordSchema]
+    speaker: str | None = None
 
 
 class TranscriptResultSchema(BaseModel):
@@ -86,6 +91,8 @@ class TranscriptResultSchema(BaseModel):
     task: Literal["transcribe", "translate"] = "transcribe"
     initial_prompt: str | None = None
     word_timestamps: bool = False
+    diarize: bool = False
+    num_speakers: int | None = None
     source: str = ""
 
 

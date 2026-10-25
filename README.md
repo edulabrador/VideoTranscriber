@@ -30,6 +30,8 @@ ejecuta localmente. No necesita claves de API ni una suscripción.
   y se liberan tras 15 minutos sin uso.
 - Opciones avanzadas: idioma del audio, vocabulario (nombres propios, siglas),
   traducción al inglés y marcas de tiempo por palabra.
+- Identificación de hablantes («Hablante 1», «Hablante 2»...) para entrevistas,
+  reuniones y pódcast, en local y sin cuentas ni tokens. Ver más abajo.
 - Reutilización inmediata de transcripciones anteriores para el mismo enlace y perfil.
 - Progreso basado en bytes descargados y segundos de audio procesados.
 - Estimación del tiempo restante y cancelación de trabajos.
@@ -108,6 +110,7 @@ También existe una interfaz de terminal:
 ```powershell
 uv run --project backend transcriber "https://www.instagram.com/reel/XXXXX/"
 uv run --project backend transcriber video.mp4 --profile precise --language es --prompt "Kubernetes, OpenAI"
+uv run --project backend transcriber entrevista.mp3 --diarize --speakers 2 --word-timestamps
 uv run --project backend transcriber --clean-orphans        # lista carpetas de output/ sin historial
 uv run --project backend transcriber --clean-orphans --yes  # y las borra
 ```
@@ -140,6 +143,7 @@ La configuración local está en `.env`. Este archivo nunca se sube a GitHub.
 | `BEAM_SIZE` | `1` | Prioriza velocidad. `5` puede mejorar precisión y tarda más |
 | `MAX_CACHED_MODELS` | `2` | Modelos que se conservan entre trabajos. En CUDA solo el activo ocupa VRAM |
 | `MODEL_IDLE_UNLOAD_SECONDS` | `900` | Libera los modelos tras ese tiempo sin uso. `0` los mantiene |
+| `DIARIZATION_THRESHOLD` | `0.5` | Agrupación de voces cuando no se indica el número de hablantes. Más alto, menos hablantes |
 
 La configuración optimizada de este ordenador está guardada únicamente en su `.env`
 local. El repositorio mantiene valores automáticos compatibles con otros equipos.
@@ -158,6 +162,31 @@ sea igual o superior a la solicitada.
 La aplicación no modifica frecuencias, voltajes, ventiladores ni límites de potencia.
 CUDA utiliza los mecanismos normales del controlador NVIDIA. Aun así, cualquier
 tarea intensiva puede elevar temporalmente el uso y la temperatura del equipo.
+
+### Identificación de hablantes
+
+Activa **Identificar quién habla** en las opciones avanzadas, o usa `--diarize` en la
+terminal. Cada fragmento del texto se etiqueta como «Hablante 1», «Hablante 2»...,
+numerados por orden de aparición. Las etiquetas aparecen en la vista, al copiar y en
+todas las exportaciones: párrafos con nombre en TXT y Markdown, `[Hablante 1]` al
+cambiar de turno en SRT y etiquetas de voz `<v Hablante 1>` en VTT.
+
+Se basa en [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) con el modelo de
+segmentación de pyannote 3.0 (licencia MIT) y un modelo de huella de voz WeSpeaker
+entrenado con VoxCeleb. Funciona con ONNX Runtime, sin PyTorch ni token de Hugging
+Face. La primera vez descarga unos 33 MB en `models/diarization/` y comprueba su
+huella SHA-256.
+
+Consejos:
+
+- **Indica el número de hablantes si lo sabes.** Es mucho más fiable. Sin él, el
+  número se estima con `DIARIZATION_THRESHOLD`, y en una grabación de prueba con
+  cuatro voces el valor por defecto detectó solo dos.
+- Combínalo con **marcas por palabra** para que los cambios de turno dentro de una
+  misma frase se separen correctamente.
+- Se ejecuta en CPU: cuenta con unos 5 a 10 segundos por minuto de audio en un
+  procesador de cuatro núcleos.
+- Las voces que se solapan se asignan a quien más habla en ese tramo.
 
 ### Fiabilidad y recuperación
 
@@ -274,6 +303,7 @@ La documentación técnica adicional está en [docs/DEV_GUIDE.md](docs/DEV_GUIDE
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp), descarga de medios.
 - [Cobalt](https://github.com/imputnet/cobalt), descarga local alternativa para TikTok y X cuando yt-dlp falla. Se instala como proyecto separado y conserva su licencia AGPL-3.0.
 - [PyAV](https://github.com/PyAV-Org/PyAV), lectura de audio y vídeo.
+- [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), identificación de hablantes con modelos de [pyannote](https://github.com/pyannote/pyannote-audio) y [WeSpeaker](https://github.com/wenet-e2e/wespeaker).
 
 El código propio de VideoTranscriber utiliza la licencia [MIT](LICENSE).
 

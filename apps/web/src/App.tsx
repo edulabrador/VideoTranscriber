@@ -36,6 +36,13 @@ function loadOptions(): TranscriptionOptions {
           ? saved.initial_prompt.slice(0, 500) || null
           : null,
       word_timestamps: saved.word_timestamps === true,
+      diarize: saved.diarize === true,
+      num_speakers:
+        Number.isInteger(saved.num_speakers) &&
+        saved.num_speakers >= 1 &&
+        saved.num_speakers <= 20
+          ? saved.num_speakers
+          : null,
     };
   } catch {
     return DEFAULT_OPTIONS;

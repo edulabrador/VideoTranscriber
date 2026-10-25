@@ -16,6 +16,11 @@ dependencies = [
   # faster-whisper's VAD uses onnxruntime; pinned below 1.24 because newer
   # onnxruntime releases dropped macOS x86_64 (Intel) wheels entirely.
   "onnxruntime<1.24",
+  # Speaker diarization with ONNX models: no PyTorch and no Hugging Face token needed.
+  # sherpa-onnx loads its native runtime from sherpa-onnx-core, which uv does not pick
+  # up from the wheel metadata, so both are pinned to the same release.
+  "sherpa-onnx==1.13.8",
+  "sherpa-onnx-core==1.13.8",
   "nvidia-cublas-cu12==12.9.2.10",
   "nvidia-cudnn-cu12==9.22.0.52",
 ]

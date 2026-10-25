@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.config import settings
-from backend.core import downloader, validators
+from backend.core import diarizer, downloader, validators
 from backend.core.audio import normalize_to_wav16k_mono
 from backend.core.downloader import AudioQuality
 from backend.core.errors import JobCancelledError, TranscriberError
@@ -192,8 +192,13 @@ def run_pipeline(
 
         _TURNS.acquire(cancel_event, report_position)
 
+        # Identifying speakers takes the last stretch of the bar when it was requested.
+        transcription_end = 88 if options.diarize else 98
+
         def report_transcription(percent: int, eta_seconds: int | None) -> None:
-            overall = transcription_start + round(percent * (98 - transcription_start) / 100)
+            overall = transcription_start + round(
+                percent * (transcription_end - transcription_start) / 100
+            )
             if eta_seconds is None:
                 remaining = "Calculando el tiempo restante."
             elif eta_seconds < 60:
@@ -229,6 +234,25 @@ def run_pipeline(
                 result.audio_language = download_result.audio_language
                 result.audio_format_id = download_result.audio_format_id
                 result.audio_selection = download_result.audio_selection
+            if options.diarize and result.segments:
+                diarization_started = time.perf_counter()
+                on_stage(
+                    "diarizing",
+                    "Identificando hablantes..."
+                    if diarizer.models_ready()
+                    else "Descargando el modelo de hablantes (unos 33 MB, solo la primera vez)...",
+                    transcription_end,
+                )
+
+                def report_diarization(percent: int) -> None:
+                    overall = transcription_end + round(percent * (98 - transcription_end) / 100)
+                    on_stage("diarizing", f"Identificando hablantes: {percent} %.", overall)
+
+                turns = diarizer.diarize(
+                    raw_audio_path, options.num_speakers, cancel_event, report_diarization,
+                )
+                result.segments = diarizer.assign_speakers(result.segments, turns)
+                result.timings["diarization"] = time.perf_counter() - diarization_started
         finally:
             model_cache.touch()
             _TURNS.release()

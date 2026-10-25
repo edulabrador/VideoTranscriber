@@ -14,6 +14,7 @@ from backend.config import settings
 from backend.core import model_manager, pipeline, transcriber
 from backend.core.errors import DownloadError, JobCancelledError
 from backend.core.exporter import (
+    Paragraph,
     paragraphs,
     read_json,
     subtitle_cues,
@@ -65,7 +66,7 @@ def test_paragraphs_split_on_long_pauses():
         TranscriptSegment(0, 2, "Uno."), TranscriptSegment(2.5, 4, "Dos."),
         TranscriptSegment(7, 9, "Tres."),
     ]
-    assert paragraphs(segments) == [(0, "Uno. Dos."), (7, "Tres.")]
+    assert paragraphs(segments) == [Paragraph(0, "Uno. Dos."), Paragraph(7, "Tres.")]
 
 
 def test_txt_and_markdown_use_paragraphs(tmp_path):

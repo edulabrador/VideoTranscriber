@@ -4,6 +4,7 @@ export type JobStatus =
   | "downloading"
   | "extracting_audio"
   | "transcribing"
+  | "diarizing"
   | "exporting"
   | "completed"
   | "failed"
@@ -23,6 +24,8 @@ export interface TranscriptionOptions {
   task: TranscriptionTask;
   initial_prompt: string | null;
   word_timestamps: boolean;
+  diarize: boolean;
+  num_speakers: number | null;
 }
 
 export const DEFAULT_OPTIONS: TranscriptionOptions = {
@@ -30,6 +33,8 @@ export const DEFAULT_OPTIONS: TranscriptionOptions = {
   task: "transcribe",
   initial_prompt: null,
   word_timestamps: false,
+  diarize: false,
+  num_speakers: null,
 };
 
 export interface JobResponse {
@@ -64,6 +69,7 @@ export interface TranscriptSegment {
   end: number;
   text: string;
   words: TranscriptWord[];
+  speaker?: string | null;
 }
 
 export interface TranscriptResult {
@@ -86,6 +92,8 @@ export interface TranscriptResult {
   task?: TranscriptionTask;
   initial_prompt?: string | null;
   word_timestamps?: boolean;
+  diarize?: boolean;
+  num_speakers?: number | null;
   source?: string;
 }
 
