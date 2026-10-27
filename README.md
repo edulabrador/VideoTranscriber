@@ -265,6 +265,12 @@ COOKIES_FILE=C:\ruta\a\cookies.txt
 
 No compartas ni subas ese archivo.
 
+Los eventos de LinkedIn también requieren cookies de una cuenta con acceso al
+vídeo. Exporta solo las de LinkedIn en formato Netscape y guarda el archivo fuera
+del código publicado. Iniciar sesión en el navegador no autentica automáticamente
+a VideoTranscriber. Tras cambiar `COOKIES_FILE`, reinicia la aplicación. Si la
+sesión caduca, renueva el archivo; también puedes subir un vídeo que ya tengas.
+
 ## Estructura
 
 ```text

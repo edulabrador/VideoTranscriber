@@ -236,6 +236,31 @@ def test_download_errors_keep_existing_handling(tmp_path, fake_ydl, error, expec
         download_media(YOUTUBE_URL, tmp_path, None, threading.Event())
 
 
+@pytest.mark.parametrize("configured_cookies", [False, True])
+def test_linkedin_events_login_error_is_actionable_and_does_not_expose_cookie_path(
+    tmp_path, fake_ydl, configured_cookies,
+):
+    cookie_file = tmp_path / "private-session-cookies.txt" if configured_cookies else None
+    fake_ydl.error = yt_dlp.utils.DownloadError(
+        "ERROR: [linkedin:events] 7520794389900693504: "
+        "This video is only available for registered users. "
+        "Use --cookies-from-browser or --cookies for the authentication."
+    )
+    with pytest.raises(PrivateContentError) as raised:
+        download_media(
+            "https://www.linkedin.com/events/7520794389900693504/?viewAsMember=true",
+            tmp_path, cookie_file, threading.Event(),
+        )
+    assert raised.value.code == "private_content"
+    assert "COOKIES_FILE" in raised.value.message
+    assert "No compartas" in raised.value.message
+    assert ("renueva" if configured_cookies else "reinicia") in raised.value.message
+    assert "private-session-cookies.txt" not in raised.value.message
+    assert fake_ydl.instances[0].params.get("cookiefile") == (
+        str(cookie_file) if configured_cookies else None
+    )
+
+
 def test_yt_dlp_goes_first_and_cobalt_is_only_a_fallback(tmp_path, fake_ydl):
     cobalt_result = DownloadResult(tmp_path / "cobalt.mp3", "title", None, None)
     with patch("backend.core.downloader._download_with_cobalt", return_value=cobalt_result) as cobalt:

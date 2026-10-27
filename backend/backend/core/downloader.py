@@ -15,7 +15,10 @@ import yt_dlp
 from backend.core import validators
 from backend.core.errors import DownloadError, JobCancelledError, PrivateContentError
 
-_PRIVATE_SIGNALS = ("login", "private", "rate-limit", "rate limit", "restricted")
+_PRIVATE_SIGNALS = (
+    "login", "private", "rate-limit", "rate limit", "restricted",
+    "registered users", "sign in", "log in", "authentication required",
+)
 _LOGGER = logging.getLogger(__name__)
 _SAFE_FORMAT_ID = re.compile(r"[A-Za-z0-9_.-]+\Z")
 _SAFE_LANGUAGE = re.compile(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]+)*\Z")
@@ -205,8 +208,15 @@ def download_media(
         lowered = message.lower()
         if any(signal in lowered for signal in _PRIVATE_SIGNALS):
             raise PrivateContentError(
-                "Este contenido requiere iniciar sesión. Exporta un archivo cookies.txt "
-                "desde el navegador, configura COOKIES_FILE y vuelve a intentarlo."
+                (
+                    "La sesión configurada no permite acceder a este contenido. "
+                    "Comprueba que tu cuenta tenga acceso y renueva el archivo de COOKIES_FILE. "
+                    if cookies_file is not None else
+                    "Este contenido requiere iniciar sesión en la plataforma. "
+                    "Exporta solo las cookies de esa plataforma a un archivo local, "
+                    "configura COOKIES_FILE y reinicia VideoTranscriber. "
+                )
+                + "No compartas el archivo de cookies. También puedes subir el vídeo ya descargado."
             ) from exc
         raise DownloadError(f"No se pudo descargar el contenido: {message}") from exc
 
