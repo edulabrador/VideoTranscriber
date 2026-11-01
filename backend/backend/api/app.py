@@ -8,10 +8,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.api import routes
 from backend.api.local_access import LocalDataAccess
 from backend.api.routes import router
+from backend.api.upload_limit import UploadSizeLimit
 from backend.config import settings
 from backend.core.audio import check_ffmpeg_available
+from backend.core.history import history_store
 from backend.core.pipeline import release_idle_models
 
 logging.basicConfig(level=logging.INFO)
@@ -52,6 +55,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         )
     if removed := remove_stale_temp_files():
         logger.info("Se eliminaron %d carpetas temporales de una ejecución anterior", removed)
+    if removed := history_store.remove_interrupted_deletions():
+        logger.info("Se terminaron de borrar %d carpetas de una ejecución anterior", removed)
     reaper = asyncio.create_task(_release_idle_models_periodically())
     try:
         yield
@@ -59,9 +64,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         reaper.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await reaper
+        # Without this, closing the server waits for running transcriptions to finish.
+        routes.shutdown()
 
 
 app = FastAPI(title="VideoTranscriber API", lifespan=lifespan)
+
+# Innermost, so its 413 still carries the CORS headers the browser needs to read it.
+app.add_middleware(UploadSizeLimit)
 
 app.add_middleware(
     CORSMiddleware,

@@ -21,8 +21,10 @@ dependencies = [
   # up from the wheel metadata, so both are pinned to the same release.
   "sherpa-onnx==1.13.8",
   "sherpa-onnx-core==1.13.8",
-  "nvidia-cublas-cu12==12.9.2.10",
-  "nvidia-cudnn-cu12==9.22.0.52",
+  # CUDA libraries for NVIDIA GPUs. They have no macOS builds (and Macs have no
+  # NVIDIA GPU), so requiring them there made the installation fail.
+  "nvidia-cublas-cu12==12.9.2.10; sys_platform != 'darwin'",
+  "nvidia-cudnn-cu12==9.22.0.52; sys_platform != 'darwin'",
 ]
 
 [project.optional-dependencies]

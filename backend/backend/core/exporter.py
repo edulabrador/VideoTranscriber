@@ -2,6 +2,8 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from backend.core.fileio import atomic_write_text
+
 from backend.core.transcriber import (
     TranscriptionOptions,
     TranscriptionResult,
@@ -139,47 +141,53 @@ def _speaker_changes(cues: list[Cue]) -> list[bool]:
 
 
 def write_txt(result: TranscriptionResult, path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
     blocks = [_with_speaker(item) for item in paragraphs(result.segments)] or [result.text]
-    path.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
+    atomic_write_text(path, "\n\n".join(blocks) + "\n")
     return path
 
 
 def write_srt(result: TranscriptionResult, path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
     lines: list[str] = []
     cues = subtitle_cues(result.segments)
     for i, (cue, changed) in enumerate(zip(cues, _speaker_changes(cues)), start=1):
         lines.append(str(i))
         lines.append(f"{_timestamp(cue.start, ',')} --> {_timestamp(cue.end, ',')}")
-        text = _wrap(cue.text)
+        text = _wrap(_cue_text(cue.text))
         lines.append(f"[{cue.speaker}] {text}" if changed else text)
         lines.append("")
-    path.write_text("\n".join(lines), encoding="utf-8")
+    atomic_write_text(path, "\n".join(lines))
     return path
 
 
+def _vtt_escape(text: str) -> str:
+    """WebVTT reads '<' as a tag and '&' as an entity, so both must be escaped."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _cue_text(text: str) -> str:
+    """'-->' inside a cue would be read as a new timing line."""
+    return text.replace("-->", "->")
+
+
 def write_vtt(result: TranscriptionResult, path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
     lines = ["WEBVTT", ""]
     for cue in subtitle_cues(result.segments):
         lines.append(f"{_timestamp(cue.start, '.')} --> {_timestamp(cue.end, '.')}")
-        text = _wrap(cue.text)
+        text = _vtt_escape(_wrap(_cue_text(cue.text)))
         # WebVTT voice spans let players style or announce each speaker.
-        lines.append(f"<v {cue.speaker}>{text}" if cue.speaker else text)
+        lines.append(f"<v {_vtt_escape(cue.speaker)}>{text}" if cue.speaker else text)
         lines.append("")
-    path.write_text("\n".join(lines), encoding="utf-8")
+    atomic_write_text(path, "\n".join(lines))
     return path
 
 
 def write_markdown(result: TranscriptionResult, path: Path, *, title: str, source: str) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
     lines = [f"# {title}", "", f"Fuente: {source}", ""]
     for paragraph in paragraphs(result.segments) or [Paragraph(0.0, result.text)]:
         speaker = f" **{paragraph.speaker}:**" if paragraph.speaker else ""
         lines.append(f"**[{_clock(paragraph.start)}]**{speaker} {paragraph.text}")
         lines.append("")
-    path.write_text("\n".join(lines), encoding="utf-8")
+    atomic_write_text(path, "\n".join(lines))
     return path
 
 
@@ -215,7 +223,6 @@ def write_json(
     created_at: str,
     audio_quality: str = "best",
 ) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "source": source,
         "title": title,
@@ -241,7 +248,7 @@ def write_json(
         "text": result.text,
         "segments": [asdict(seg) for seg in result.segments],
     }
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False))
     return path
 
 

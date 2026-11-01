@@ -112,8 +112,14 @@ class JobManager:
         message: str,
         progress_percent: int | None = None,
     ) -> None:
-        job = self.get_job(job_id)
-        if job is not None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status in _TERMINAL_STATUSES:
+                return
+            if status == "completed":
+                # Only set_result may finish a job: a poller that saw "completed" before
+                # the result was stored would get a 409 and report a false failure.
+                return
             if job.cancel_event.is_set() and status not in _TERMINAL_STATUSES:
                 return  # Keep showing "cancelling" until the worker actually stops.
             job.status = status
@@ -127,29 +133,41 @@ class JobManager:
         result: TranscriptionResult,
         message: str = "Transcripción completada.",
     ) -> None:
-        job = self.get_job(job_id)
-        if job is not None:
-            job.result = result
-            job.status = "completed"
-            job.stage_message = message
-            job.progress_percent = 100
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is not None:
+                job.result = result
+                job.error = None
+                job.status = "completed"
+                job.stage_message = message
+                job.progress_percent = 100
 
     def set_error(self, job_id: str, code: str, message: str, status: JobStatus = "failed") -> None:
-        job = self.get_job(job_id)
-        if job is not None:
-            job.status = status
-            job.error = {"code": code, "message": message}
-            job.stage_message = message
-            job.progress_percent = 100
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is not None:
+                job.status = status
+                job.error = {"code": code, "message": message}
+                job.stage_message = message
+                job.progress_percent = 100
 
     def request_cancel(self, job_id: str) -> bool:
-        job = self.get_job(job_id)
-        if job is None or job.status in ("completed", "failed", "cancelled"):
-            return False
-        job.cancel_event.set()
-        job.status = "cancelling"
-        job.progress_percent = 99
-        return True
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.status in _TERMINAL_STATUSES:
+                return False
+            job.cancel_event.set()
+            job.status = "cancelling"
+            job.progress_percent = 99
+            return True
+
+    def cancel_all(self) -> int:
+        """Ask every unfinished job to stop, for example when the server shuts down."""
+        with self._lock:
+            pending = [job for job in self._jobs.values() if job.status not in _TERMINAL_STATUSES]
+            for job in pending:
+                job.cancel_event.set()
+            return len(pending)
 
 
 job_manager = JobManager()

@@ -164,6 +164,31 @@ test("upload, speakers, playback, search, editing, summary and library", async (
   );
   assert.equal(await page.locator(".export-actions a").count(), 6);
 
+  // A later correction marks the summary as outdated.
+  await page.getByRole("button", { name: /Corregir texto/ }).click();
+  await page.getByLabel("Texto en 0:05").fill("Segunda frase corregida.");
+  await page.getByRole("button", { name: /Guardar cambios/ }).click();
+  await page.waitForSelector("text=Vuelve a resumir para actualizarlo");
+
+  // Giving two speakers the same name asks before merging them for good.
+  await page.getByRole("button", { name: /Corregir texto/ }).click();
+  await page.getByLabel("Nombre para Hablante 2").fill("Ana");
+  let confirmation = "";
+  page.once("dialog", (dialog) => {
+    confirmation = dialog.message();
+    void dialog.dismiss();
+  });
+  await page.getByRole("button", { name: /Guardar cambios/ }).click();
+  assert.match(confirmation, /«Ana»/);
+  await page.getByRole("button", { name: "Cancelar", exact: true }).click();
+  assert.deepEqual(
+    await page.locator(".speaker-label").allInnerTexts(),
+    ["Ana", "Hablante 2", "Ana", "Hablante 2", "Ana", "Hablante 2"].slice(
+      0,
+      await page.locator(".speaker-label").count(),
+    ),
+  );
+
   if (process.env.E2E_SCREENSHOTS) {
     await page.screenshot({
       path: join(process.env.E2E_SCREENSHOTS, "transcript.png"),

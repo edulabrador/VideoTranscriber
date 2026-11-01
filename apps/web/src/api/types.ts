@@ -98,6 +98,15 @@ export interface TranscriptResult {
   edited?: boolean;
   has_audio?: boolean;
   summary?: string | null;
+  /** The transcript was corrected after the summary was written. */
+  summary_outdated?: boolean;
+}
+
+export interface SummaryTask {
+  state: "idle" | "running" | "done" | "failed" | "cancelled";
+  message: string;
+  error: JobError | null;
+  markdown: string | null;
 }
 
 export interface SummaryStatus {
@@ -117,6 +126,11 @@ export interface HistoryItem {
   text?: string;
   status?: "completed" | "failed";
   error?: string | null;
+  /** Failed links only: the original request, so a retry repeats it exactly. */
+  retry?: (Partial<TranscriptionOptions> & {
+    profile?: TranscriptionProfile;
+    audio_quality?: AudioQuality;
+  }) | null;
 }
 
 export interface HealthResponse {
@@ -126,6 +140,7 @@ export interface HealthResponse {
   compute_type: string;
   gpu_memory_mb: number | null;
   batch_size: number;
+  max_upload_bytes?: number;
 }
 
 export type ExportFormat = "txt" | "md" | "srt" | "vtt" | "json" | "summary";

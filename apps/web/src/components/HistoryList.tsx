@@ -53,7 +53,9 @@ export function HistoryList() {
     setBusy(true);
     setActionError(null);
     try {
+      // Repeat the request that failed: same profile, quality and options.
       const job = await postJson<JobResponse>("/api/jobs", {
+        ...(entry.retry ?? {}),
         url: entry.source,
         force: true,
       });

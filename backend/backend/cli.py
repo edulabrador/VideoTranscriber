@@ -10,7 +10,7 @@ import typer
 
 from backend.config import settings
 from backend.core.errors import TranscriberError
-from backend.core.history import history_store
+from backend.core.history import KEPT_MARKER, history_store
 from backend.core.pipeline import FileSource, URLSource, run_pipeline
 from backend.core.transcriber import TranscriptionOptions
 from backend.core.validators import is_supported_url
@@ -115,7 +115,8 @@ def main(
     ),
     clean_orphans: bool = typer.Option(
         False, "--clean-orphans",
-        help="Listar las carpetas de output/ que ya no están en el historial",
+        help="Listar las carpetas de output/ que ya no están en el historial "
+        "(las creadas con --no-history se conservan)",
     ),
     yes: bool = typer.Option(False, "--yes", help="Con --clean-orphans, borrarlas de verdad"),
 ) -> None:
@@ -187,6 +188,11 @@ def main(
             raise typer.Exit(code=0) from None
         typer.echo(f"Error: {exc.message}", err=True)
         raise typer.Exit(code=1) from None
+
+    if not record_history and output_dir is None:
+        # Saved under output/ without a history entry: mark it as kept on purpose so
+        # --clean-orphans never deletes it.
+        (out_dir / KEPT_MARKER).touch()
 
     if not no_clipboard:
         _copy_to_clipboard(result.text)

@@ -5,12 +5,14 @@ summarised in parts first, then the partial notes are combined.
 """
 import json
 import logging
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from backend.config import settings
-from backend.core.errors import TranscriberError
+from backend.core.errors import JobCancelledError, TranscriberError
 from backend.core.exporter import paragraphs
 from backend.core.transcriber import TranscriptionResult
 
@@ -117,8 +119,19 @@ def _ask(model: str, prompt: str) -> str:
     return content
 
 
-def summarize(result: TranscriptionResult, title: str) -> str:
+def summarize(
+    result: TranscriptionResult,
+    title: str,
+    on_progress: Callable[[str], None] | None = None,
+    cancel_event: threading.Event | None = None,
+) -> str:
     """Markdown with a short summary, key points and timestamped chapters."""
+    report = on_progress or (lambda _message: None)
+
+    def check_cancelled() -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise JobCancelledError("Se canceló el resumen")
+
     current = status()
     if not current.available or current.model is None:
         raise SummaryError(
@@ -128,19 +141,25 @@ def summarize(result: TranscriptionResult, title: str) -> str:
     language = settings.summary_language
     parts = chunks(transcript_lines(result))
     if len(parts) > 1:
-        notes = [
-            _ask(current.model, (
+        notes = []
+        for index, part in enumerate(parts, start=1):
+            check_cancelled()
+            report(f"Resumiendo la parte {index} de {len(parts)} con {current.model}...")
+            notes.append(_ask(current.model, (
                 f"Esta es la parte {index} de {len(parts)} de la transcripción de «{title}». "
                 f"Escribe en {language} notas breves con las ideas principales y conserva "
                 f"las marcas de tiempo [mm:ss] de cada tema.\n\n{part}"
-            ))
-            for index, part in enumerate(parts, start=1)
-        ]
+            )))
         material = "\n\n".join(notes)
         source = "Notas de cada parte de la transcripción"
     else:
         material = parts[0]
         source = "Transcripción"
+    check_cancelled()
+    report(
+        f"Redactando el resumen final con {current.model}..." if len(parts) > 1
+        else f"Resumiendo con {current.model}..."
+    )
     answer = _ask(current.model, (
         f"{source} de «{title}». Las marcas [mm:ss] indican el momento de cada parte.\n\n"
         f"{material}\n\n"

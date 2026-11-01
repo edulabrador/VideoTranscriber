@@ -38,10 +38,13 @@ def make_listening_copy(
     input_path: Path, output_path: Path,
     cancel_event: threading.Event | None = None, *, timeout: float = 600,
 ) -> Path:
-    """Small mono AAC file (about 20 MB per hour) for playback next to the transcript."""
+    """Small mono AAC file (about 20 MB per hour) for playback next to the transcript.
+
+    16 kHz is the rate Whisper hears; a higher rate would only add bytes.
+    """
     return _convert(
         input_path, output_path,
-        ["-vn", "-ac", "1", "-ar", "22050", "-c:a", "aac", "-b:a", "40k",
+        ["-vn", "-ac", "1", "-ar", "16000", "-c:a", "aac", "-b:a", "40k",
          "-movflags", "+faststart"],
         cancel_event, timeout=timeout, missing="No se encontró FFmpeg para guardar el audio",
     )
