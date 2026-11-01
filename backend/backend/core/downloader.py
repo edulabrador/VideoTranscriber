@@ -110,6 +110,19 @@ def _pick_original_audio_format(
     return selected["format_id"], f"pista original identificada ({original_language})"
 
 
+def _reject_live(info: object) -> None:
+    if not isinstance(info, dict):
+        return
+    status = info.get("live_status")
+    if info.get("is_live") or status == "is_live":
+        raise DownloadError(
+            "Es una emisión en directo y todavía no ha terminado. Vuelve a intentarlo "
+            "cuando la emisión haya finalizado y esté disponible como vídeo."
+        )
+    if status == "is_upcoming":
+        raise DownloadError("La emisión todavía no ha empezado. No hay audio que transcribir.")
+
+
 def download_media(
     url: str,
     dest_dir: Path,
@@ -152,10 +165,13 @@ def download_media(
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # Read the metadata first so a live stream is refused before it starts
+            # downloading, which would otherwise never finish.
+            info = ydl.extract_info(url, download=False)
+            if cancel_event.is_set():
+                raise _CancelledSentinel()
+            _reject_live(info)
             if validators.is_youtube_url(url):
-                info = ydl.extract_info(url, download=False)
-                if cancel_event.is_set():
-                    raise _CancelledSentinel()
                 format_id, reason = _pick_original_audio_format(info, audio_quality)
                 if format_id:
                     ydl.params["format"] = format_id
@@ -184,7 +200,7 @@ def download_media(
                         reason, audio_quality,
                     )
             else:
-                info = ydl.extract_info(url, download=True)
+                info = ydl.process_ie_result(info, download=True)
             audio_path = Path(ydl.prepare_filename(info))
     except _CancelledSentinel as exc:
         raise JobCancelledError() from exc

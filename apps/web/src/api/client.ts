@@ -1,3 +1,5 @@
+import { errorDetail, fallbackMessage } from "../lib/apiErrors";
+
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8187";
 
 export class ApiError extends Error {
@@ -13,16 +15,17 @@ export class ApiError extends Error {
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    let code = "request_failed";
-    let message = "No se pudo completar la solicitud";
+    let body: unknown = null;
     try {
-      const body = await res.json();
-      message = body.detail?.message ?? body.detail ?? message;
-      code = body.detail?.code ?? code;
+      body = await res.json();
     } catch {
-      // response body wasn't JSON — fall back to statusText
+      // The body wasn't JSON; fall back to a message for the status code.
     }
-    throw new ApiError(code, message, res.status);
+    const { code, message } = errorDetail(
+      (body as { detail?: unknown } | null)?.detail,
+      fallbackMessage(res.status),
+    );
+    throw new ApiError(code ?? "request_failed", message, res.status);
   }
   return (await res.json()) as T;
 }
@@ -38,7 +41,16 @@ async function fetchApi(
     );
     const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
     return await fetch(`${BASE_URL}${path}`, { ...init, signal });
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new ApiError(
+        "timeout",
+        "El servidor local tardó demasiado en responder. Inténtalo de nuevo.",
+      );
+    }
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ApiError("aborted", "Solicitud cancelada.");
+    }
     throw new ApiError("network_error", "No se pudo conectar con el servidor local.");
   }
 }
@@ -66,12 +78,6 @@ export async function patchJson<T>(path: string, body: unknown): Promise<T> {
   return handleResponse<T>(res);
 }
 
-export async function postLong<T>(path: string): Promise<T> {
-  // Local summaries can take minutes on a CPU, longer than the default timeout.
-  const res = await fetchApi(path, { method: "POST" }, 900_000);
-  return handleResponse<T>(res);
-}
-
 export async function postForm<T>(path: string, form: FormData): Promise<T> {
   const res = await fetchApi(path, { method: "POST", body: form });
   return handleResponse<T>(res);
@@ -79,7 +85,8 @@ export async function postForm<T>(path: string, form: FormData): Promise<T> {
 
 export async function del(path: string): Promise<void> {
   const res = await fetchApi(path, { method: "DELETE" });
-  if (!res.ok) throw new ApiError("request_failed", "No se pudo eliminar el elemento");
+  // Reuse the server's explanation, for example a file that is still in use.
+  if (!res.ok) await handleResponse<never>(res);
 }
 
 export function downloadFileUrl(path: string): string {

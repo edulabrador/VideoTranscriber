@@ -101,8 +101,27 @@ downloads the models and a real four-speaker recording.
 files on disk never disagree with what the UI shows. The pipeline keeps `audio.m4a`
 (mono AAC, ~20 MB/h) unless `KEEP_AUDIO=false`; `GET /api/jobs/{id}/audio` serves it
 with Range support. `summarizer.py` talks to Ollama over its HTTP API and splits long
-transcripts into chunks of `CHUNK_CHARS`; the UI renders its Markdown with React
-elements only (`MarkdownText.tsx`), never as HTML.
+transcripts into chunks of `CHUNK_CHARS`. Summaries run in the background:
+`POST /api/jobs/{id}/summary` starts one (202, never two at once for the same job),
+`GET` reports its state and progress message and `DELETE` cancels it between chunks.
+The result carries `summary_outdated` when the transcript was edited after the summary.
+The UI renders the Markdown with React elements only (`MarkdownText.tsx`), never as HTML.
+
+## Concurrency and storage
+
+Transcription jobs run on their own thread pool (`routes._JOB_EXECUTOR`), not on
+asyncio's default one, so a long queue cannot starve `asyncio.to_thread` callers.
+Routes that touch the disk or locks are plain `def` functions, which FastAPI runs in
+its thread pool instead of on the event loop. `pipeline.PreparationSlots` limits
+concurrent downloads and conversions (`MAX_CONCURRENT_DOWNLOADS`). On the CPU, speaker
+identification keeps the transcription slot; after a GPU transcription it takes a
+separate slot so the GPU is free for the next job.
+
+`core/fileio.py` provides atomic writes (temporary file, `fsync`, rename) and an
+inter-process file lock. `HistoryStore` uses both, so the server and the CLI can write
+the history at the same time. A damaged history is backed up and rebuilt from the
+`transcript.json` files instead of being overwritten. Deleting renames the folder to
+`.deleting-*` first, so it is all or nothing; leftovers are removed at startup.
 
 ## Browser and model tests
 

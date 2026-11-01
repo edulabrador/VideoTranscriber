@@ -110,6 +110,8 @@ class TranscriptResultSchema(BaseModel):
     edited: bool = False
     has_audio: bool = False
     summary: str | None = None
+    # The transcript was corrected after the summary was written.
+    summary_outdated: bool = False
 
 
 class HistoryItemSchema(BaseModel):
@@ -124,6 +126,7 @@ class HistoryItemSchema(BaseModel):
     text: str | None = None
     status: Literal["completed", "failed"] = "completed"
     error: str | None = None
+    retry: dict | None = None
 
 
 class SummaryStatusResponse(BaseModel):
@@ -131,8 +134,11 @@ class SummaryStatusResponse(BaseModel):
     model: str | None = None
 
 
-class SummaryResponse(BaseModel):
-    markdown: str
+class SummaryTaskResponse(BaseModel):
+    state: Literal["idle", "running", "done", "failed", "cancelled"]
+    message: str = ""
+    error: JobErrorPayload | None = None
+    markdown: str | None = None
 
 
 class HealthResponse(BaseModel):
@@ -144,3 +150,4 @@ class HealthResponse(BaseModel):
     gpu_memory_mb: int | None
     batch_size: int
     loaded_models: list[str] = Field(default_factory=list)
+    max_upload_bytes: int = 0

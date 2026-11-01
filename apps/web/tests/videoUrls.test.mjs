@@ -25,3 +25,10 @@ test("timestamps link to the right second on YouTube only", () => {
   assert.equal(timestampLink("https://vimeo.com/123", 10), null);
   assert.equal(timestampLink(undefined, 10), null);
 });
+
+test("timestamp links can be built from an already parsed video id", async () => {
+  const { youtubeTimestampLink, timestampLink } = await import("../src/lib/videoUrls.ts");
+  assert.equal(youtubeTimestampLink("abc123", 61.9), "https://www.youtube.com/watch?v=abc123&t=61s");
+  assert.equal(youtubeTimestampLink(null, 5), null);
+  assert.equal(timestampLink("https://youtu.be/abc123", 5), "https://www.youtube.com/watch?v=abc123&t=5s");
+});

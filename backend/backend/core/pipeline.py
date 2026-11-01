@@ -85,6 +85,39 @@ _TURNS = TranscriptionTurns()
 _DIARIZATION_TURNS = TranscriptionTurns()
 
 
+class PreparationSlots:
+    """Bounds how many jobs download or convert audio at the same time.
+
+    Without it, queuing many links starts every download at once: they compete for
+    bandwidth and fill the temporary folder with audio that waits hours for its turn.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self._limit = max(1, limit)
+        self._condition = threading.Condition()
+        self._active = 0
+
+    def acquire(self, cancel_event: threading.Event, on_wait: Callable[[], None]) -> None:
+        waited = False
+        with self._condition:
+            while self._active >= self._limit:
+                if cancel_event.is_set():
+                    raise JobCancelledError()
+                if not waited:
+                    on_wait()
+                    waited = True
+                self._condition.wait(0.25)
+            self._active += 1
+
+    def release(self) -> None:
+        with self._condition:
+            self._active -= 1
+            self._condition.notify_all()
+
+
+_PREPARATION = PreparationSlots(settings.max_concurrent_downloads)
+
+
 def release_idle_models() -> bool:
     """Free cached models after the configured idle time. True when memory was freed."""
     idle_limit = settings.model_idle_unload_seconds
@@ -119,6 +152,32 @@ def _noop_stage(_status: JobStatus, _message: str, _progress: int | None = None)
     pass
 
 
+def _identify_speakers(
+    result: TranscriptionResult,
+    audio_path: Path,
+    options: TranscriptionOptions,
+    cancel_event: threading.Event,
+    on_stage: StageCallback,
+    start_percent: int,
+) -> None:
+    started = time.perf_counter()
+    on_stage(
+        "diarizing",
+        "Identificando hablantes..."
+        if diarizer.models_ready()
+        else "Descargando el modelo de hablantes (unos 33 MB, solo la primera vez)...",
+        start_percent,
+    )
+
+    def report(percent: int) -> None:
+        overall = start_percent + round(percent * (98 - start_percent) / 100)
+        on_stage("diarizing", f"Identificando hablantes: {percent} %.", overall)
+
+    turns = diarizer.diarize(audio_path, options.num_speakers, cancel_event, report)
+    result.segments = diarizer.assign_speakers(result.segments, turns)
+    result.timings["diarization"] = time.perf_counter() - started
+
+
 def run_pipeline(
     job_id: str,
     source: Source,
@@ -136,6 +195,10 @@ def run_pipeline(
     output_dir = output_dir or (settings.output_dir / job_id)
     job_temp_dir = settings.temp_dir / job_id
     job_temp_dir.mkdir(parents=True, exist_ok=True)
+    # A failed or cancelled job must not leave a half-written folder (for example
+    # the audio copy) that no history entry points to.
+    output_is_new = not output_dir.exists()
+    succeeded = False
     started_at = time.perf_counter()
     timings: dict[str, float] = {}
 
@@ -145,22 +208,29 @@ def run_pipeline(
         if isinstance(source, URLSource):
             validators.validate_supported_url(source.url)
 
-            on_stage("downloading", "Consultando el vídeo y las pistas de audio...", 1)
+            _PREPARATION.acquire(cancel_event, lambda: on_stage(
+                "queued", "En cola: esperando a que terminen otras descargas...", 0,
+            ))
+            try:
+                download_started = time.perf_counter()
+                on_stage("downloading", "Consultando el vídeo y las pistas de audio...", 1)
 
-            def report_download(message: str, percent: int | None) -> None:
-                overall = 1 if percent is None else 1 + round(percent * 0.19)
-                on_stage("downloading", message, overall)
+                def report_download(message: str, percent: int | None) -> None:
+                    overall = 1 if percent is None else 1 + round(percent * 0.19)
+                    on_stage("downloading", message, overall)
 
-            download_result = downloader.download_media(
-                source.url,
-                job_temp_dir,
-                settings.cookies_file,
-                cancel_event,
-                on_progress=report_download,
-                cobalt_api_url=settings.cobalt_api_url,
-                audio_quality=audio_quality,
-            )
-            timings["download"] = time.perf_counter() - started_at
+                download_result = downloader.download_media(
+                    source.url,
+                    job_temp_dir,
+                    settings.cookies_file,
+                    cancel_event,
+                    on_progress=report_download,
+                    cobalt_api_url=settings.cobalt_api_url,
+                    audio_quality=audio_quality,
+                )
+                timings["download"] = time.perf_counter() - download_started
+            finally:
+                _PREPARATION.release()
             raw_audio_path = download_result.audio_path
             title = download_result.title
             source_label = source.url
@@ -172,12 +242,19 @@ def run_pipeline(
                 else "Audio: pista por defecto, no identificada"
             )
         else:
-            on_stage("extracting_audio", "Preparando el audio del archivo subido...", 0)
-            raw_audio_path = normalize_to_wav16k_mono(
-                source.path, job_temp_dir / "audio.wav", cancel_event,
-                timeout=settings.audio_preparation_timeout_seconds,
-            )
-            timings["audio_preparation"] = time.perf_counter() - started_at
+            _PREPARATION.acquire(cancel_event, lambda: on_stage(
+                "queued", "En cola: esperando a que terminen otras preparaciones de audio...", 0,
+            ))
+            try:
+                preparation_started = time.perf_counter()
+                on_stage("extracting_audio", "Preparando el audio del archivo subido...", 0)
+                raw_audio_path = normalize_to_wav16k_mono(
+                    source.path, job_temp_dir / "audio.wav", cancel_event,
+                    timeout=settings.audio_preparation_timeout_seconds,
+                )
+                timings["audio_preparation"] = time.perf_counter() - preparation_started
+            finally:
+                _PREPARATION.release()
             title = source.original_name
             source_label = source.original_name
             source_type = "file"
@@ -213,6 +290,7 @@ def run_pipeline(
                 overall,
             )
 
+        diarize = bool(options.diarize)
         try:
             timings["queue"] = time.perf_counter() - queue_started
             if cancel_event.is_set():
@@ -236,16 +314,20 @@ def run_pipeline(
                 result.audio_language = download_result.audio_language
                 result.audio_format_id = download_result.audio_format_id
                 result.audio_selection = download_result.audio_selection
+            diarize = diarize and bool(result.segments)
+            if diarize and result.device != "cuda":
+                # On the CPU, speaker identification keeps the slot it already holds:
+                # releasing it would send this job to the back of the queue.
+                _identify_speakers(result, raw_audio_path, options, cancel_event,
+                                   on_stage, transcription_end)
+                diarize = False
         finally:
             model_cache.touch()
             _TURNS.release()
 
-        if options.diarize and result.segments:
-            # Speaker identification runs on the CPU. After a GPU transcription it takes its
-            # own turn, leaving the GPU free for the next job; after a CPU transcription it
-            # shares the transcription slot so both never compete for the same cores.
-            diarization_turns = _DIARIZATION_TURNS if result.device == "cuda" else _TURNS
-
+        if diarize:
+            # After a GPU transcription, speakers are identified on the CPU in a separate
+            # turn, leaving the GPU free for the next job.
             def report_diarization_position(ahead: int) -> None:
                 if ahead:
                     on_stage(
@@ -254,28 +336,12 @@ def run_pipeline(
                         transcription_end,
                     )
 
-            diarization_turns.acquire(cancel_event, report_diarization_position)
+            _DIARIZATION_TURNS.acquire(cancel_event, report_diarization_position)
             try:
-                diarization_started = time.perf_counter()
-                on_stage(
-                    "diarizing",
-                    "Identificando hablantes..."
-                    if diarizer.models_ready()
-                    else "Descargando el modelo de hablantes (unos 33 MB, solo la primera vez)...",
-                    transcription_end,
-                )
-
-                def report_diarization(percent: int) -> None:
-                    overall = transcription_end + round(percent * (98 - transcription_end) / 100)
-                    on_stage("diarizing", f"Identificando hablantes: {percent} %.", overall)
-
-                turns = diarizer.diarize(
-                    raw_audio_path, options.num_speakers, cancel_event, report_diarization,
-                )
-                result.segments = diarizer.assign_speakers(result.segments, turns)
-                result.timings["diarization"] = time.perf_counter() - diarization_started
+                _identify_speakers(result, raw_audio_path, options, cancel_event,
+                                   on_stage, transcription_end)
             finally:
-                diarization_turns.release()
+                _DIARIZATION_TURNS.release()
 
         if settings.keep_audio:
             on_stage("exporting", "Guardando el audio para poder escucharlo...", 99)
@@ -319,6 +385,7 @@ def run_pipeline(
             )
         logger.info("Job %s timings (seconds): %s", job_id, result.timings)
 
+        succeeded = True
         on_stage("completed", "Transcripción completada.", 100)
         return result
     except TranscriberError:
@@ -327,3 +394,5 @@ def run_pipeline(
         raise TranscriberError(f"Se produjo un error inesperado: {exc}") from exc
     finally:
         shutil.rmtree(job_temp_dir, ignore_errors=True)
+        if not succeeded and output_is_new:
+            shutil.rmtree(output_dir, ignore_errors=True)

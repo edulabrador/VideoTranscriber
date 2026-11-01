@@ -1,16 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { downloadFileUrl, patchJson } from "../api/client";
-import type { TranscriptResult } from "../api/types";
+import type { TranscriptResult, TranscriptSegment } from "../api/types";
 import { useJobContext } from "../context/JobContext";
 import {
   copyableText,
   highlightParts,
+  mergedSpeakerNames,
   segmentAt,
+  speakerNameProblem,
   speakers,
   transcriptEdits,
 } from "../lib/transcript";
-import { timestampLink } from "../lib/videoUrls";
+import { youtubeTimestampLink, youtubeVideoId } from "../lib/videoUrls";
 import { CopyButton } from "./CopyButton";
 import { ExportMenu } from "./ExportMenu";
 import { Icon } from "./Icon";
@@ -51,6 +53,100 @@ function Highlighted({ text, query }: { text: string; query: string }) {
   );
 }
 
+interface SegmentRowProps {
+  segment: TranscriptSegment;
+  index: number;
+  label: string | null;
+  speakerClass: number;
+  playing: boolean;
+  currentMatch: boolean;
+  showTimestamps: boolean;
+  canSeek: boolean;
+  videoId: string | null;
+  editing: boolean;
+  draft: string | undefined;
+  query: string;
+  onSeek: (seconds: number) => void;
+  onDraft: (index: number, text: string) => void;
+}
+
+/**
+ * One segment. Memoised: while the audio plays, the "playing" highlight changes
+ * several times a second and only the two affected rows should re-render, not the
+ * whole transcript.
+ */
+const SegmentRow = memo(function SegmentRow({
+  segment,
+  index,
+  label,
+  speakerClass,
+  playing,
+  currentMatch,
+  showTimestamps,
+  canSeek,
+  videoId,
+  editing,
+  draft,
+  query,
+  onSeek,
+  onDraft,
+}: SegmentRowProps) {
+  const time = formatTimestamp(segment.start);
+  const link = !editing && !canSeek ? youtubeTimestampLink(videoId, segment.start) : null;
+  const text = draft ?? segment.text;
+  return (
+    <div
+      data-segment={index}
+      className={[
+        "segment",
+        label ? "speaker-turn" : "",
+        playing ? "playing" : "",
+        currentMatch ? "current-match" : "",
+      ].join(" ")}
+    >
+      {label && (
+        <span className={`speaker-label speaker-${speakerClass % 6}`}>{label}</span>
+      )}
+      {showTimestamps &&
+        (canSeek && !editing ? (
+          <button
+            type="button"
+            className="timestamp"
+            onClick={() => onSeek(segment.start)}
+            title="Escuchar desde aquí"
+          >
+            {time}
+          </button>
+        ) : link ? (
+          <a
+            className="timestamp"
+            href={link}
+            target="_blank"
+            rel="noreferrer"
+            title="Abrir el vídeo en este momento"
+          >
+            {time}
+          </a>
+        ) : (
+          <span className="timestamp">{time}</span>
+        ))}
+      {editing ? (
+        <textarea
+          className="segment-editor"
+          value={text}
+          rows={Math.max(1, Math.ceil(text.length / 70))}
+          onChange={(event) => onDraft(index, event.target.value)}
+          aria-label={`Texto en ${time}`}
+        />
+      ) : (
+        <span>
+          <Highlighted text={segment.text} query={query} />
+        </span>
+      )}
+    </div>
+  );
+});
+
 export function TranscriptView({
   jobId,
   result,
@@ -69,7 +165,11 @@ export function TranscriptView({
   const [playing, setPlaying] = useState(-1);
   const audio = useRef<HTMLAudioElement>(null);
   const textBox = useRef<HTMLDivElement>(null);
-  const speakerNames = speakers(result);
+  const speakerNames = useMemo(() => speakers(result), [result]);
+  const videoId = useMemo(
+    () => (result.source ? youtubeVideoId(result.source) : null),
+    [result.source],
+  );
 
   const matches = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase("es");
@@ -117,9 +217,24 @@ export function TranscriptView({
   };
 
   const save = async () => {
+    const problem = Object.values(names).map(speakerNameProblem).find(Boolean);
+    if (problem) {
+      setEditError(problem);
+      return;
+    }
     const changes = transcriptEdits(result, texts, names);
     if (!changes.segments.length && !Object.keys(changes.speakers).length) {
       setEditing(false);
+      return;
+    }
+    const merged = mergedSpeakerNames(speakerNames, names);
+    if (
+      merged.length &&
+      !window.confirm(
+        `Varios hablantes se llamarán ${merged.map((name) => `«${name}»`).join(", ")}. ` +
+          "Sus intervenciones se unirán y no se podrán volver a separar. ¿Guardar igualmente?",
+      )
+    ) {
       return;
     }
     setSaving(true);
@@ -144,11 +259,17 @@ export function TranscriptView({
     }
   };
 
-  const seek = (seconds: number) => {
+  const seek = useCallback((seconds: number) => {
     if (!audio.current) return;
     audio.current.currentTime = seconds;
     void audio.current.play().catch(() => undefined);
-  };
+  }, []);
+
+  const updateDraft = useCallback((index: number, text: string) => {
+    setTexts((current) => ({ ...current, [index]: text }));
+  }, []);
+
+  const currentMatch = matches.length ? matches[matchCursor % matches.length] : -1;
 
   return (
     <section
@@ -268,78 +389,33 @@ export function TranscriptView({
       <div className="transcript-text" ref={textBox}>
         {result.segments.length ? (
           result.segments.map((segment, index) => {
-            const link = timestampLink(result.source, segment.start);
             const newSpeaker =
-              segment.speaker &&
+              Boolean(segment.speaker) &&
               segment.speaker !== result.segments[index - 1]?.speaker;
-            const label = segment.speaker
-              ? editing
-                ? names[segment.speaker] || segment.speaker
-                : segment.speaker
-              : null;
-            const time = formatTimestamp(segment.start);
+            const label =
+              newSpeaker && segment.speaker
+                ? editing
+                  ? names[segment.speaker] || segment.speaker
+                  : segment.speaker
+                : null;
             return (
-              <div
+              <SegmentRow
                 key={index}
-                data-segment={index}
-                className={[
-                  "segment",
-                  newSpeaker ? "speaker-turn" : "",
-                  index === playing ? "playing" : "",
-                  matches[matchCursor % matches.length] === index
-                    ? "current-match"
-                    : "",
-                ].join(" ")}
-              >
-                {newSpeaker && (
-                  <span
-                    className={`speaker-label speaker-${speakerNames.indexOf(segment.speaker ?? "") % 6}`}
-                  >
-                    {label}
-                  </span>
-                )}
-                {showTimestamps &&
-                  (result.has_audio && !editing ? (
-                    <button
-                      type="button"
-                      className="timestamp"
-                      onClick={() => seek(segment.start)}
-                      title="Escuchar desde aquí"
-                    >
-                      {time}
-                    </button>
-                  ) : link && !editing ? (
-                    <a
-                      className="timestamp"
-                      href={link}
-                      target="_blank"
-                      rel="noreferrer"
-                      title="Abrir el vídeo en este momento"
-                    >
-                      {time}
-                    </a>
-                  ) : (
-                    <span className="timestamp">{time}</span>
-                  ))}
-                {editing ? (
-                  <textarea
-                    className="segment-editor"
-                    value={texts[index] ?? segment.text}
-                    rows={Math.max(
-                      1,
-                      Math.ceil((texts[index] ?? segment.text).length / 70),
-                    )}
-                    onChange={(event) =>
-                      setTexts({ ...texts, [index]: event.target.value })
-                    }
-                    aria-label={`Texto en ${time}`}
-                  />
-                ) : (
-                  <span>
-                    <Highlighted text={segment.text} query={query} />
-                  </span>
-                )}
-              </div>
+                segment={segment}
+                index={index}
+                label={label}
+                speakerClass={speakerNames.indexOf(segment.speaker ?? "")}
+                playing={index === playing}
+                currentMatch={index === currentMatch}
+                showTimestamps={showTimestamps}
+                canSeek={Boolean(result.has_audio)}
+                videoId={videoId}
+                editing={editing}
+                draft={editing ? texts[index] : undefined}
+                query={editing ? "" : query}
+                onSeek={seek}
+                onDraft={updateDraft}
+              />
             );
           })
         ) : (
@@ -397,10 +473,11 @@ export function TranscriptView({
         <SummaryPanel
           jobId={jobId}
           summary={result.summary}
+          outdated={Boolean(result.summary_outdated)}
           onSummary={(markdown) =>
             dispatch({
               type: "SET_RESULT",
-              result: { ...result, summary: markdown },
+              result: { ...result, summary: markdown, summary_outdated: false },
             })
           }
         />

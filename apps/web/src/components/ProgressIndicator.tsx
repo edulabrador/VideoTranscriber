@@ -54,7 +54,8 @@ export function ProgressIndicator() {
           </span>
           <h2>{LABELS[state.status]}</h2>
         </div>
-        {!isTerminal && <CancelButton />}
+        {/* Keyed by job so a new job never inherits a previous "Cancelando..." state. */}
+        {!isTerminal && <CancelButton key={state.jobId} />}
       </div>
       <p className="progress-detail" aria-live="polite">
         {isError && state.error ? state.error.message : state.stageMessage}

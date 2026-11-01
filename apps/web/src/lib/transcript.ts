@@ -73,3 +73,23 @@ export function transcriptEdits(
   );
   return { segments, speakers };
 }
+
+/** Names given to more than one speaker: saving would merge them for good. */
+export function mergedSpeakerNames(
+  originals: string[],
+  names: Record<string, string>,
+): string[] {
+  const owners = new Map<string, string[]>();
+  for (const original of originals) {
+    const name = (names[original] ?? original).trim() || original;
+    owners.set(name, [...(owners.get(name) ?? []), original]);
+  }
+  return [...owners].filter(([, list]) => list.length > 1).map(([name]) => name);
+}
+
+/** Why a speaker name would be rejected by the server, or null when it is fine. */
+export function speakerNameProblem(name: string): string | null {
+  if (/[<>\r\n]/.test(name)) return "Los nombres de los hablantes no pueden contener < ni >.";
+  if (name.trim().length > 60) return "Los nombres de los hablantes admiten como máximo 60 caracteres.";
+  return null;
+}

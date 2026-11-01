@@ -178,6 +178,10 @@ uv run --project backend transcriber --clean-orphans --yes  # y las borra
 Otras opciones de la CLI: `--audio-quality`, `--translate`, `--cookies`, `--output-dir`,
 `--no-history` y `--no-clipboard` (consulta `transcriber --help`).
 
+Los resultados creados con `--no-history` se marcan como conservados a propósito, así
+que `--clean-orphans` nunca los borra. La terminal y la aplicación pueden usarse a la
+vez: el historial se protege con un bloqueo compartido.
+
 ## ¿Se puede ejecutar directamente desde GitHub?
 
 No puede ejecutarse la aplicación completa dentro de GitHub Pages. Pages solo sirve
@@ -206,6 +210,7 @@ La configuración local está en `.env`. Este archivo nunca se sube a GitHub.
 | `BEAM_SIZE` | `1` | Prioriza velocidad. `5` puede mejorar precisión y tarda más |
 | `MAX_CACHED_MODELS` | `2` | Modelos que se conservan entre trabajos. En CUDA solo el activo ocupa VRAM |
 | `MODEL_IDLE_UNLOAD_SECONDS` | `900` | Libera los modelos tras ese tiempo sin uso. `0` los mantiene |
+| `MAX_CONCURRENT_DOWNLOADS` | `2` | Trabajos que descargan o preparan audio a la vez. El resto espera su turno en la cola |
 | `MAX_HISTORY_ENTRIES` | `1000` | Transcripciones guardadas. Al superarlo se borra la más antigua y sus archivos |
 | `MAX_FAILED_ENTRIES` | `20` | Trabajos fallidos que se recuerdan, aparte del límite anterior |
 | `MAX_UPLOAD_BYTES` | `536870912` | Tamaño máximo de una subida (512 MiB) |
@@ -264,8 +269,11 @@ Si tienes [Ollama](https://ollama.com) en marcha con algún modelo (por ejemplo
 resumen, los puntos clave y capítulos con marcas de tiempo, y lo guarda como
 `summary.md` junto al resto de exportaciones. Todo ocurre en tu ordenador. Las
 transcripciones largas se resumen por partes y después se combinan. Con un modelo
-pequeño en CPU puede tardar varios minutos. La calidad depende del modelo que elijas
-y, como en cualquier resumen automático, conviene revisarlo.
+pequeño en CPU puede tardar varios minutos: el resumen se genera en segundo plano,
+muestra qué parte se está procesando y se puede cancelar. Si corriges la
+transcripción después, la interfaz avisa de que el resumen ha quedado desactualizado.
+La calidad depende del modelo que elijas y, como en cualquier resumen automático,
+conviene revisarlo.
 
 <details>
 <summary><strong>Fiabilidad y recuperación</strong></summary>
@@ -286,10 +294,23 @@ la interfaz indica que hay que volver a enviarlos.
 
 En el historial puedes buscar por título, enlace o texto, abrir cualquier resultado,
 copiarlo y exportarlo. Al eliminar una entrada puedes elegir si se borran también
-sus archivos. La eliminación de archivos requiere confirmación.
+sus archivos. La eliminación de archivos requiere confirmación y es completa o no
+ocurre: si algún archivo está en uso (por ejemplo, el audio que se está reproduciendo
+en Windows), no se toca nada y se explica el motivo. **Reintentar** un trabajo fallido
+repite la petición original con el mismo perfil, calidad y opciones.
+
+Si `history.json` se daña, no se sobrescribe: se guarda una copia como
+`history.corrupt-<fecha>.json` y el historial se reconstruye a partir de las
+transcripciones guardadas en `output/`. Las transcripciones y el historial se escriben
+de forma atómica, así que un corte de luz no deja archivos a medias.
+
+Las emisiones en directo que aún no han terminado se rechazan antes de descargar,
+porque su descarga no acabaría nunca.
 
 Las subidas admiten hasta **512 MiB** por defecto, configurable con `MAX_UPLOAD_BYTES`
-en `.env`. El servidor genera el nombre del archivo y elimina las subidas incompletas.
+en `.env`. La interfaz rechaza los archivos demasiado grandes antes de enviarlos y el
+servidor los rechaza antes de leerlos. El servidor genera el nombre del archivo y
+elimina las subidas incompletas.
 
 Los instaladores fijan Cobalt al commit de `scripts/cobalt-ref.txt`. Si una instalación
 existente usa otro commit, se detienen para que puedas revisar los cambios antes de
