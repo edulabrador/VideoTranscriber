@@ -5,14 +5,28 @@
 **Convierte vídeos de YouTube, Instagram, TikTok y Twitter (X) en texto desde tu ordenador.**
 
 [![Licencia MIT](https://img.shields.io/badge/licencia-MIT-yellow.svg)](LICENSE)
-[![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![React](https://img.shields.io/badge/React-TypeScript-149eca.svg)](https://react.dev/)
+[![faster-whisper](https://img.shields.io/badge/ASR-faster--whisper-2f6f73.svg)](https://github.com/SYSTRAN/faster-whisper)
+[![Local](https://img.shields.io/badge/procesamiento-100%25_local-2f6f73.svg)](#privacidad-y-archivos)
 
 </div>
+
+![Pantalla de inicio de VideoTranscriber: pegar un enlace o subir un archivo, perfil y calidad del audio, biblioteca](docs/img/inicio.png)
 
 VideoTranscriber descarga únicamente el audio necesario y lo transcribe mediante
 [faster-whisper](https://github.com/SYSTRAN/faster-whisper). El reconocimiento se
 ejecuta localmente. No necesita claves de API ni una suscripción.
+
+**Estado:** versión `0.1.0`, pensada para uso personal en un solo ordenador (ver
+[docs/PRODUCTION_GUIDE.md](docs/PRODUCTION_GUIDE.md)). Funciona en Windows con un
+iniciador de doble clic, y en macOS y Linux con `scripts/setup.sh`.
+
+<p align="center">
+  <img src="docs/img/transcripcion.png" alt="Transcripción con dos hablantes, reproductor de audio, búsqueda y exportaciones" width="49%">
+  <img src="docs/img/opciones-avanzadas.png" alt="Opciones avanzadas: idioma, vocabulario, traducción, marcas por palabra e identificación de hablantes" width="49%">
+</p>
+<p align="center"><sub>Resultado con hablantes identificados y opciones avanzadas. Capturas hechas con el servidor de pruebas <code>scripts/e2e_server.py</code> (modelos simulados, audio de prueba).</sub></p>
 
 ## Funciones
 
@@ -54,6 +68,31 @@ ejecuta localmente. No necesita claves de API ni una suscripción.
 - Interfaz en español, modo oscuro y diseño adaptable.
 - Limpieza automática de los archivos temporales.
 
+## Cómo funciona
+
+```mermaid
+flowchart LR
+  W["Interfaz web (React, :5187)"] --> API["API FastAPI (:8187)"]
+  CLI["CLI transcriber"] --> P
+  API --> Q["Cola de trabajos"]
+  Q --> P["Pipeline"]
+  P --> D{"¿Enlace o archivo?"}
+  D -- enlace --> Y["yt-dlp: solo el audio"]
+  Y -. "si falla con TikTok o X" .-> C["Cobalt local (:9187)"]
+  D -- archivo --> U["Subida (máx. 512 MiB)"]
+  Y --> F["FFmpeg: WAV mono 16 kHz"]
+  C --> F
+  U --> F
+  F --> T["faster-whisper / CTranslate2 (CUDA o CPU)"]
+  T --> S["Hablantes: sherpa-onnx (opcional)"]
+  S --> E["Exportaciones: TXT, MD, SRT, VTT, JSON"]
+  E --> H[("Historial local")]
+  E -. "botón Resumir" .-> O["Ollama local (opcional)"]
+```
+
+Todo se ejecuta en tu ordenador: los vídeos solo se solicitan a la plataforma original o al
+descargador Cobalt local, y los modelos se guardan en `models/`.
+
 ## Iniciar en Windows sin Codex
 
 Codex no es necesario para usar el programa.
@@ -82,7 +121,7 @@ Instala una sola vez:
 - El controlador NVIDIA actualizado si se va a utilizar una GPU NVIDIA.
 
 El iniciador utiliza pnpm directamente si está instalado. Si no lo encuentra,
-lo prepara automáticamente mediante Corepack, incluido con Node.js en este equipo.
+lo prepara automáticamente mediante Corepack, incluido con Node.js.
 
 Después descarga el proyecto:
 
@@ -96,6 +135,19 @@ Por último, haz doble clic en `Iniciar VideoTranscriber.bat`.
 La primera preparación descarga las dependencias. La primera transcripción descarga
 también el modelo de voz. Puede ocupar varios gigabytes y las siguientes ejecuciones
 reutilizan todo lo descargado.
+
+## Iniciar en macOS o Linux
+
+Necesitas uv, pnpm (por ejemplo con `corepack enable pnpm`), FFmpeg/FFprobe y Python 3.11 o posterior.
+
+```bash
+git clone https://github.com/edulabrador/VideoTranscriber.git
+cd VideoTranscriber
+bash scripts/setup.sh   # dependencias, Cobalt fijado y archivos .env
+pnpm dev
+```
+
+`bash scripts/setup.sh --prefetch-model` descarga además el modelo de voz por adelantado.
 
 ## Inicio manual
 
@@ -123,6 +175,9 @@ uv run --project backend transcriber --clean-orphans        # lista carpetas de 
 uv run --project backend transcriber --clean-orphans --yes  # y las borra
 ```
 
+Otras opciones de la CLI: `--audio-quality`, `--translate`, `--cookies`, `--output-dir`,
+`--no-history` y `--no-clipboard` (consulta `transcriber --help`).
+
 Los resultados creados con `--no-history` se marcan como conservados a propósito, así
 que `--clean-orphans` nunca los borra. La terminal y la aplicación pueden usarse a la
 vez: el historial se protege con un bloqueo compartido.
@@ -148,7 +203,7 @@ La configuración local está en `.env`. Este archivo nunca se sube a GitHub.
 |---|---|---|
 | `COOKIES_FILE` | vacío | Archivo `cookies.txt` para publicaciones que exigen sesión |
 | `COBALT_API_URL` | `http://127.0.0.1:9187` | Descargador local opcional. Solo se usa si yt-dlp falla con TikTok o X |
-| `MODEL_SIZE` | `auto` | Modelo de faster-whisper |
+| `MODEL_SIZE` | `auto` | Modelo de faster-whisper. `auto` usa `large-v3-turbo` |
 | `DEVICE` | `auto` | Selección entre `cuda` y `cpu` |
 | `COMPUTE_TYPE` | `auto` | Precisión de cálculo |
 | `BATCH_SIZE` | `0` | `0` ajusta los lotes automáticamente según la VRAM |
@@ -158,6 +213,7 @@ La configuración local está en `.env`. Este archivo nunca se sube a GitHub.
 | `MAX_CONCURRENT_DOWNLOADS` | `2` | Trabajos que descargan o preparan audio a la vez. El resto espera su turno en la cola |
 | `MAX_HISTORY_ENTRIES` | `1000` | Transcripciones guardadas. Al superarlo se borra la más antigua y sus archivos |
 | `MAX_FAILED_ENTRIES` | `20` | Trabajos fallidos que se recuerdan, aparte del límite anterior |
+| `MAX_UPLOAD_BYTES` | `536870912` | Tamaño máximo de una subida (512 MiB) |
 | `KEEP_AUDIO` | `true` | Guarda una copia ligera del audio (unos 20 MB por hora) para escucharla |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Servidor local de Ollama para los resúmenes. Vacío oculta la función |
 | `OLLAMA_MODEL` | vacío | Modelo de Ollama. Vacío usa el primero instalado |
@@ -169,7 +225,7 @@ local. El repositorio mantiene valores automáticos compatibles con otros equipo
 ### Perfiles y rendimiento
 
 - **Rápido** usa el modelo `small` y prioriza terminar antes.
-- **Equilibrado** usa la configuración local. Es la opción recomendada para uso normal.
+- **Equilibrado** usa la configuración local (`MODEL_SIZE`, por defecto `large-v3-turbo`). Es la opción recomendada para uso normal.
 - **Preciso** usa `large-v3`, una búsqueda más exhaustiva y un lote limitado para proteger la VRAM.
 
 La calidad Compacta descarga audio de menor tamaño. Equilibrada ofrece un término
@@ -219,7 +275,8 @@ transcripción después, la interfaz avisa de que el resumen ha quedado desactua
 La calidad depende del modelo que elijas y, como en cualquier resumen automático,
 conviene revisarlo.
 
-### Fiabilidad y recuperación
+<details>
+<summary><strong>Fiabilidad y recuperación</strong></summary>
 
 El progreso distingue consulta del vídeo, descarga del audio, preparación del archivo,
 espera en cola, carga o descarga del modelo y transcripción. En YouTube se muestra
@@ -259,6 +316,8 @@ Los instaladores fijan Cobalt al commit de `scripts/cobalt-ref.txt`. Si una inst
 existente usa otro commit, se detienen para que puedas revisar los cambios antes de
 actualizarla. No actualizan ese componente automáticamente.
 
+</details>
+
 ## Privacidad y archivos
 
 La transcripción se realiza en el ordenador. Los vídeos solo se solicitan a la
@@ -274,6 +333,10 @@ Estos directorios no se suben a GitHub:
 - `.env`: configuración privada.
 
 Los archivos temporales se eliminan al terminar o cancelar un trabajo.
+
+### Acceso a los datos
+
+El backend solo atiende a este ordenador. Comprueba la dirección del cliente, Host y Origin, y rechaza los encabezados de reenvío detectables. La interfaz y las llamadas locales habituales conservan su funcionamiento. Las peticiones remotas directas al historial, las transcripciones o las descargas se rechazan. Un túnel TCP que oculte el origen puede parecer un cliente local. Para compartir una instancia debe diseñarse una capa de autenticación explícita; no se debe ocultar el origen remoto detrás de un proxy local.
 
 ## Contenido que requiere iniciar sesión
 
@@ -296,9 +359,10 @@ sesión caduca, renueva el archivo; también puedes subir un vídeo que ya tenga
 
 ```text
 apps/web/          Interfaz React, TypeScript y Tailwind
-backend/backend/   API FastAPI y motor de transcripción
+backend/backend/   API FastAPI, CLI y motor de transcripción
 backend/tests/     Pruebas del backend
-scripts/           Preparación para macOS y Linux
+scripts/           Preparación para macOS y Linux, parche de Cobalt, benchmark y servidor e2e
+docs/              Guía de desarrollo y de uso desatendido
 services/cobalt/   Dependencia descargada localmente. No se copia al repositorio
 models/            Modelos locales
 output/            Transcripciones guardadas
@@ -331,7 +395,8 @@ Dependabot propone cada semana la última versión de yt-dlp, que YouTube obliga
 actualizar a menudo. Las pruebas de red contra YouTube siguen siendo opcionales
 (`VIDEO_TRANSCRIBER_LIVE_TEST=1`).
 
-### Tiempos de procesamiento
+<details>
+<summary><strong>Tiempos de procesamiento y benchmark</strong></summary>
 
 En «Detalles de transcripción» se muestran los segundos de descarga o preparación
 del archivo, espera en cola, carga del modelo, análisis y transcripción. Se guardan
@@ -357,6 +422,8 @@ uv run --project backend python scripts/benchmark.py "C:\ruta\audio.wav" --runs 
 El benchmark no añade entradas al historial personal y borra sus propios archivos
 de salida al acabar. Usa la configuración y los modelos locales de la aplicación.
 
+</details>
+
 La documentación técnica adicional está en [docs/DEV_GUIDE.md](docs/DEV_GUIDE.md).
 
 ## Tecnologías y licencias
@@ -367,10 +434,12 @@ La documentación técnica adicional está en [docs/DEV_GUIDE.md](docs/DEV_GUIDE
 - [Cobalt](https://github.com/imputnet/cobalt), descarga local alternativa para TikTok y X cuando yt-dlp falla. Se instala como proyecto separado y conserva su licencia AGPL-3.0.
 - [PyAV](https://github.com/PyAV-Org/PyAV), lectura de audio y vídeo.
 - [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), identificación de hablantes con modelos de [pyannote](https://github.com/pyannote/pyannote-audio) y [WeSpeaker](https://github.com/wenet-e2e/wespeaker).
+- FastAPI en el backend; React, TypeScript, Vite y Tailwind en la interfaz.
 
 El código propio de VideoTranscriber utiliza la licencia [MIT](LICENSE).
 
-## Dependencias revisadas de Cobalt
+<details>
+<summary><strong>Dependencias revisadas de Cobalt</strong></summary>
 
 Usa Node 20.19 o posterior y pnpm 11.25.0. Los instaladores aplican `scripts/cobalt-security.patch` sobre el commit fijado, sin descargar una rama cambiante. El parche solo actualiza el bloqueo y la configuración de dependencias; conserva las versiones nativas existentes. Si hay cambios locales incompatibles, el proceso se detiene antes de sobrescribirlos.
 
@@ -378,7 +447,4 @@ En una instalación existente, con los procesos parados y tras actualizar el có
 
 El [aviso de `braces`](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) fue retirado el 23/10/2026 porque no se considera explotable en la práctica. Ya no se registra como vulnerabilidad pendiente.
 
-
-### Acceso a los datos
-
-El backend solo atiende a este ordenador. Comprueba la dirección del cliente, Host y Origin, y rechaza los encabezados de reenvío detectables. La interfaz y las llamadas locales habituales conservan su funcionamiento. Las peticiones remotas directas al historial, las transcripciones o las descargas se rechazan. Un túnel TCP que oculte el origen puede parecer un cliente local. Para compartir una instancia debe diseñarse una capa de autenticación explícita; no se debe ocultar el origen remoto detrás de un proxy local.
+</details>
