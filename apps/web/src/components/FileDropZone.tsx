@@ -1,10 +1,12 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useDropzone } from "react-dropzone";
 
-import { postForm } from "../api/client";
+import { getJson, postForm } from "../api/client";
+import { formatBytes } from "../lib/apiErrors";
 import { isTerminalStatus } from "../api/types";
 import { useJobContext } from "../context/JobContext";
 import type {
+  HealthResponse,
   JobResponse,
   TranscriptionOptions,
   TranscriptionProfile,
@@ -12,15 +14,23 @@ import type {
 import { Icon } from "./Icon";
 
 // Browsers do not always know the MIME type of these, so accept them by extension too.
+// Same list as the server accepts (backend/api/routes.py).
 const MEDIA_EXTENSIONS = [
   ".aac",
+  ".aiff",
+  ".amr",
+  ".avi",
   ".flac",
+  ".flv",
   ".m4a",
+  ".m4v",
   ".mka",
   ".mkv",
   ".mov",
   ".mp3",
   ".mp4",
+  ".mpeg",
+  ".mpg",
   ".oga",
   ".ogg",
   ".opus",
@@ -47,15 +57,35 @@ export function FileDropZone({
   const [uploading, setUploading] = useState(false);
   const jobActive = Boolean(state.status && !isTerminalStatus(state.status));
   const disabled = uploading;
+  const [maxBytes, setMaxBytes] = useState<number | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    getJson<HealthResponse>("/api/health", controller.signal)
+      .then((health) => setMaxBytes(health.max_upload_bytes || null))
+      .catch(() => undefined); // The server still enforces the limit.
+    return () => controller.abort();
+  }, []);
 
   const onDrop = useCallback(
     async (accepted: File[]) => {
       if (!accepted.length) return;
       setError(null);
-      setUploading(true);
       const failures: string[] = [];
+      // Refuse oversized files before sending them: the server would only stop
+      // the upload once the browser had already pushed the whole file.
+      const files = accepted.filter((file) => {
+        if (maxBytes && file.size > maxBytes) {
+          failures.push(
+            `${file.name}: supera el tamaño máximo de ${formatBytes(maxBytes)}`,
+          );
+          return false;
+        }
+        return true;
+      });
+      setUploading(files.length > 0);
       let first: string | null = null;
-      for (const file of accepted) {
+      for (const file of files) {
         const form = new FormData();
         form.append("file", file);
         form.append("profile", profile);
@@ -78,11 +108,11 @@ export function FileDropZone({
         }
       }
       setUploading(false);
-      onQueued();
+      if (files.length) onQueued();
       if (first && !jobActive) dispatch({ type: "START_JOB", jobId: first });
       if (failures.length) setError(failures.join("\n"));
     },
-    [dispatch, profile, options, onQueued, jobActive],
+    [dispatch, profile, options, onQueued, jobActive, maxBytes],
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({

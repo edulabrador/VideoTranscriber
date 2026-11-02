@@ -3,12 +3,17 @@ import logging
 import re
 import shutil
 import threading
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from backend.config import settings
 from backend.core.exporter import PROCESSING_VERSION, read_json, result_from_payload, write_all
+from backend.core.fileio import atomic_write_text, interprocess_lock
 from backend.core.model_manager import select_device
 from backend.core.transcriber import (
     TranscriptionOptions,
@@ -20,6 +25,8 @@ from backend.core.transcriber import (
 _QUALITY_RANK = {"compact": 0, "balanced": 1, "best": 2}
 # Marks a folder whose history entry was deleted on purpose while keeping its files.
 KEPT_MARKER = ".kept"
+# Folders renamed to this prefix are being deleted; a crash may leave one behind.
+DELETING_PREFIX = ".deleting-"
 _JOB_ID = re.compile(r"job_[A-Za-z0-9_-]{1,64}")
 _YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"}
 _KNOWN_PATH_HOSTS = {"instagram.com", "tiktok.com", "x.com", "twitter.com"}
@@ -93,6 +100,8 @@ class HistoryItem:
     language: str
     status: str = "completed"  # "completed" | "failed"
     error: str | None = None
+    # Failed jobs only: the request that failed, so "Reintentar" repeats it exactly.
+    retry: dict | None = None
 
 
 class HistoryStore:
@@ -101,24 +110,78 @@ class HistoryStore:
         self._max_entries = max_entries
         self._max_failed = max_failed
         self._output_dir = output_dir
-        self._lock = threading.Lock()
+        self._thread_lock = threading.Lock()
+
+    @contextmanager
+    def _lock(self) -> Iterator[None]:
+        """Serialise access within this process and with the CLI in another process."""
+        with self._thread_lock, interprocess_lock(self._path.with_name(self._path.name + ".lock")):
+            yield
 
     def _read(self) -> list[dict]:
-        if not self._path.exists():
+        try:
+            raw = self._path.read_text(encoding="utf-8")
+        except FileNotFoundError:
             return []
         try:
-            return json.loads(self._path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return []
+            entries = json.loads(raw)
+        except ValueError:
+            return self._recover(raw)
+        if not isinstance(entries, list) or not all(
+            isinstance(entry, dict) and isinstance(entry.get("id"), str) for entry in entries
+        ):
+            return self._recover(raw)
+        return entries
+
+    def _recover(self, raw: str) -> list[dict]:
+        """Keep the damaged file aside and rebuild the history from the saved transcripts.
+
+        Writing an empty list over it would make every transcript look orphaned and
+        lose it for good at the next clean-up.
+        """
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+        backup = self._path.with_name(f"{self._path.stem}.corrupt-{stamp}{self._path.suffix}")
+        if raw.strip():
+            atomic_write_text(backup, raw)
+        entries = self._rebuild_from_outputs()
+        self._write(entries)
+        logger.warning(
+            "El historial estaba dañado. Se guardó una copia en %s y se reconstruyeron "
+            "%d entradas a partir de las transcripciones guardadas.",
+            backup.name, len(entries),
+        )
+        return entries
+
+    def _rebuild_from_outputs(self) -> list[dict]:
+        entries: list[dict] = []
+        if not self._output_dir.is_dir():
+            return entries
+        for path in self._output_dir.iterdir():
+            if (
+                not path.is_dir() or path.is_symlink() or not _JOB_ID.fullmatch(path.name)
+                or (path / KEPT_MARKER).exists()
+            ):
+                continue
+            try:
+                payload = json.loads((path / "transcript.json").read_text(encoding="utf-8"))
+                source = str(payload.get("source", ""))
+                entries.append(asdict(HistoryItem(
+                    id=path.name,
+                    source_type="url" if source.startswith(("http://", "https://")) else "file",
+                    source=source,
+                    title=str(payload.get("title") or source or path.name),
+                    created_at=str(payload.get("created_at", "")),
+                    duration=float(payload.get("duration", 0)),
+                    word_count=int(payload.get("word_count", 0)),
+                    language=str(payload.get("language", "")),
+                )))
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
+        entries.sort(key=lambda entry: entry["created_at"], reverse=True)
+        return entries[: self._max_entries]
 
     def _write(self, entries: list[dict]) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self._path.with_suffix(".tmp")
-        try:
-            temporary.write_text(json.dumps(entries, indent=2, ensure_ascii=False), encoding="utf-8")
-            temporary.replace(self._path)
-        finally:
-            temporary.unlink(missing_ok=True)
+        atomic_write_text(self._path, json.dumps(entries, indent=2, ensure_ascii=False))
 
     def _job_dir(self, item_id: str) -> Path | None:
         if not _JOB_ID.fullmatch(item_id):
@@ -134,7 +197,7 @@ class HistoryStore:
             shutil.rmtree(path, ignore_errors=True)
 
     def load_result(self, item_id: str) -> TranscriptionResult | None:
-        with self._lock:
+        with self._lock():
             if not any(
                 entry.get("id") == item_id and entry.get("status", "completed") == "completed"
                 for entry in self._read()
@@ -150,7 +213,7 @@ class HistoryStore:
 
     def add_entry(self, item: HistoryItem) -> None:
         source_key = _source_key(item.source)
-        with self._lock:
+        with self._lock():
             entries = [entry for entry in self._read() if entry.get("id") != item.id]
             if item.status == "completed":
                 # A success supersedes earlier failures of the same source.
@@ -178,7 +241,7 @@ class HistoryStore:
 
     def orphan_outputs(self) -> list[Path]:
         """Output folders no history entry references and nobody chose to keep."""
-        with self._lock:
+        with self._lock():
             known = {entry.get("id") for entry in self._read()}
         if not self._output_dir.exists():
             return []
@@ -189,7 +252,7 @@ class HistoryStore:
         )
 
     def list_entries(self, query: str = "") -> list[dict]:
-        with self._lock:
+        with self._lock():
             entries = self._read()
             matches: list[dict] = []
             previews = 0
@@ -230,7 +293,7 @@ class HistoryStore:
         model, beam_size = resolve_job_model(
             profile, options, settings.model_size, settings.beam_size, device,
         )
-        with self._lock:
+        with self._lock():
             entries = self._read()
 
         for entry in entries:
@@ -272,7 +335,7 @@ class HistoryStore:
         speaker_names: dict[str, str] | None = None,
     ) -> TranscriptionResult | None:
         """Apply hand corrections and rewrite every export. None if the item is unknown."""
-        with self._lock:
+        with self._lock():
             entries = self._read()
             entry = next(
                 (e for e in entries if e.get("id") == item_id
@@ -307,23 +370,47 @@ class HistoryStore:
             return result
 
     def delete_entry(self, item_id: str, delete_files: bool = False) -> bool:
-        with self._lock:
+        """Remove an entry, and optionally its files, all or nothing.
+
+        The folder is first renamed out of the way. If any file is in use (Windows
+        refuses the rename then) nothing changes and OSError is raised, instead of
+        leaving an entry that points at a half-deleted folder.
+        """
+        trash: Path | None = None
+        with self._lock():
             entries = self._read()
-            filtered = [e for e in entries if e["id"] != item_id]
+            filtered = [e for e in entries if e.get("id") != item_id]
             if len(filtered) == len(entries):
                 return False
+            path = self._job_dir(item_id)
             if delete_files:
-                path = self._job_dir(item_id)
                 if path is None:
                     return False
                 if path.exists():
-                    shutil.rmtree(path)
-            else:
-                path = self._job_dir(item_id)
-                if path is not None and path.is_dir():
-                    (path / KEPT_MARKER).touch()
-            self._write(filtered)
-            return True
+                    trash = path.with_name(f"{DELETING_PREFIX}{item_id}-{uuid.uuid4().hex[:8]}")
+                    path.rename(trash)
+            elif path is not None and path.is_dir():
+                (path / KEPT_MARKER).touch()
+            try:
+                self._write(filtered)
+            except BaseException:
+                if trash is not None and path is not None:
+                    trash.rename(path)
+                raise
+        if trash is not None:
+            shutil.rmtree(trash, ignore_errors=True)
+        return True
+
+    def remove_interrupted_deletions(self) -> int:
+        """Finish deleting folders a previous run renamed but could not remove."""
+        if not self._output_dir.is_dir():
+            return 0
+        removed = 0
+        for path in self._output_dir.iterdir():
+            if path.name.startswith(DELETING_PREFIX) and path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path, ignore_errors=True)
+                removed += 1
+        return removed
 
 
 history_store = HistoryStore(

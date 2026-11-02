@@ -43,3 +43,23 @@ test("only real changes are sent when saving edits", () => {
     { segments: [{ index: 1, text: "Hasta luego." }], speakers: { "Hablante 1": "Ana" } },
   );
 });
+
+test("giving two speakers the same name is detected before saving", async () => {
+  const { mergedSpeakerNames } = await import("../src/lib/transcript.ts");
+  const originals = ["Hablante 1", "Hablante 2", "Hablante 3"];
+  assert.deepEqual(mergedSpeakerNames(originals, { "Hablante 1": "Hablante 2" }), ["Hablante 2"]);
+  assert.deepEqual(mergedSpeakerNames(originals, { "Hablante 1": " Ana ", "Hablante 3": "Ana" }), ["Ana"]);
+  // Swapping names is not a merge.
+  assert.deepEqual(
+    mergedSpeakerNames(originals, { "Hablante 1": "Hablante 2", "Hablante 2": "Hablante 1" }),
+    [],
+  );
+  assert.deepEqual(mergedSpeakerNames(originals, { "Hablante 1": "" }), []);
+});
+
+test("speaker names the server would reject are explained", async () => {
+  const { speakerNameProblem } = await import("../src/lib/transcript.ts");
+  assert.match(speakerNameProblem("Ana <presentadora>"), /< ni >/);
+  assert.match(speakerNameProblem("x".repeat(61)), /60/);
+  assert.equal(speakerNameProblem("Ana"), null);
+});

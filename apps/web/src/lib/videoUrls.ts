@@ -54,8 +54,12 @@ export function parseUrlList(text: string): { urls: string[]; invalid: string[] 
   return { urls, invalid };
 }
 
+/** Link that opens a known YouTube video at a given second. */
+export function youtubeTimestampLink(videoId: string | null, seconds: number): string | null {
+  return videoId ? `https://www.youtube.com/watch?v=${videoId}&t=${Math.floor(seconds)}s` : null;
+}
+
 /** Link that opens a YouTube video at a given second, or null for other sources. */
 export function timestampLink(source: string | undefined, seconds: number): string | null {
-  const videoId = source ? youtubeVideoId(source) : null;
-  return videoId ? `https://www.youtube.com/watch?v=${videoId}&t=${Math.floor(seconds)}s` : null;
+  return youtubeTimestampLink(source ? youtubeVideoId(source) : null, seconds);
 }

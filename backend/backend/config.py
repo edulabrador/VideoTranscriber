@@ -40,15 +40,17 @@ class Settings(BaseSettings):
     # Failed jobs are kept apart so they never push real transcripts out.
     max_failed_entries: int = Field(default=20, ge=0)
     max_upload_bytes: int = Field(default=512 * 1024 * 1024, gt=0)
+    # Jobs that download or convert audio at the same time; the rest wait their turn.
+    max_concurrent_downloads: int = Field(default=2, ge=1)
     audio_preparation_timeout_seconds: float = Field(default=600, gt=0)
     # Models kept between jobs. On CUDA only the active one uses VRAM; the rest wait in RAM.
     max_cached_models: int = Field(default=2, ge=1)
     # Free every model after this many idle seconds. 0 keeps them loaded forever.
     model_idle_unload_seconds: float = Field(default=900, ge=0)
-    # Speaker clustering when the number of speakers is not given. Higher merges more
-    # voices into one speaker; lower splits them into more.
     # Keep a small audio copy (about 20 MB per hour) to play it next to the transcript.
     keep_audio: bool = True
+    # Speaker clustering when the number of speakers is not given. Higher merges more
+    # voices into one speaker; lower splits them into more.
     diarization_threshold: float = Field(default=0.5, gt=0, lt=2)
 
     def ensure_dirs(self) -> None:
