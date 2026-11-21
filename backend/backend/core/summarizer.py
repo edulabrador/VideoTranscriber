@@ -8,6 +8,7 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from hashlib import sha256
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
@@ -75,6 +76,11 @@ def transcript_lines(result: TranscriptionResult) -> list[str]:
         speaker = f"{paragraph.speaker}: " if paragraph.speaker else ""
         lines.append(f"[{_clock(paragraph.start)}] {speaker}{paragraph.text}")
     return lines or [result.text]
+
+
+def source_revision(result: TranscriptionResult) -> str:
+    """Fingerprint the same text, speakers and time labels sent to Ollama."""
+    return sha256(json.dumps(transcript_lines(result)).encode("utf-8")).hexdigest()
 
 
 def chunks(lines: list[str], size: int | None = None) -> list[str]:

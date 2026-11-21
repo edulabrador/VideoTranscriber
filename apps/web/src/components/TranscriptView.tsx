@@ -474,10 +474,10 @@ export function TranscriptView({
           jobId={jobId}
           summary={result.summary}
           outdated={Boolean(result.summary_outdated)}
-          onSummary={(markdown) =>
+          onSummary={(markdown, outdated) =>
             dispatch({
               type: "SET_RESULT",
-              result: { ...result, summary: markdown, summary_outdated: false },
+              result: { ...result, summary: markdown, summary_outdated: outdated },
             })
           }
         />

@@ -107,6 +107,7 @@ export interface SummaryTask {
   message: string;
   error: JobError | null;
   markdown: string | null;
+  summary_outdated?: boolean;
 }
 
 export interface SummaryStatus {

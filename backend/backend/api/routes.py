@@ -9,7 +9,7 @@ from pathlib import PureWindowsPath
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import ValidationError
 
 from backend.api.schemas import (
@@ -31,6 +31,7 @@ from backend.config import settings
 from backend.core.audio import check_ffmpeg_available
 from backend.core.downloader import AudioQuality
 from backend.core.errors import JobCancelledError, TranscriberError, UnsupportedURLError
+from backend.core.exporter import read_json
 from backend.core.fileio import atomic_write_text
 from backend.core.history import HistoryItem, _source_key, history_store
 from backend.core.job_manager import JobRecord, JobStatus, job_manager
@@ -212,15 +213,12 @@ def create_job_from_url(payload: CreateJobFromUrlRequest) -> JobResponse:
         return JobResponse(id=job.id, status="completed", cached=True)
 
     dedup_key = _dedup_key(payload.url, payload.profile, payload.audio_quality, options)
-    running = None if payload.force else job_manager.find_active(dedup_key)
-    if running is not None:
-        return JobResponse(id=running.id, status=running.status)
-
-    job = job_manager.create_job(source=payload.url, dedup_key=dedup_key)
-    _start_background(
-        job.id, URLSource(url=payload.url), payload.profile, payload.audio_quality, options,
-        replaces,
-    )
+    job, created = job_manager.create_or_reuse(payload.url, dedup_key, force=payload.force)
+    if created:
+        _start_background(
+            job.id, URLSource(url=payload.url), payload.profile, payload.audio_quality, options,
+            replaces,
+        )
     return JobResponse(id=job.id, status=job.status)
 
 
@@ -345,16 +343,31 @@ def _has_audio(job_id: str) -> bool:
     return (settings.output_dir / job_id / LISTENING_COPY).is_file()
 
 
+_SUMMARY_REVISION_PREFIX = "<!-- videotranscriber-source: "
+
+
 def _summary(job_id: str) -> tuple[str | None, bool]:
-    """The saved summary, and whether the transcript was corrected after it."""
+    """Return the saved summary and whether its input still matches the transcript."""
     folder = settings.output_dir / job_id
     try:
         summary_path = folder / SUMMARY_FILE
         text = summary_path.read_text(encoding="utf-8")
-        outdated = summary_path.stat().st_mtime < (folder / "transcript.json").stat().st_mtime
-        return text, outdated
     except OSError:
         return None, False
+    transcript_path = folder / "transcript.json"
+    header, _, markdown = text.partition("\n")
+    if header.startswith(_SUMMARY_REVISION_PREFIX) and header.endswith(" -->"):
+        revision = header.removeprefix(_SUMMARY_REVISION_PREFIX).removesuffix(" -->")
+        try:
+            outdated = revision != summarizer.source_revision(read_json(transcript_path))
+        except (OSError, ValueError, KeyError, TypeError):
+            outdated = True
+        return markdown, outdated
+    # Older summaries did not record their input.
+    try:
+        return text, summary_path.stat().st_mtime_ns < transcript_path.stat().st_mtime_ns
+    except OSError:
+        return text, True
 
 
 @router.get("/summary/status", response_model=SummaryStatusResponse)
@@ -384,11 +397,14 @@ _SUMMARY_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="summar
 def _summary_response(job_id: str, task: _SummaryTask | None) -> SummaryTaskResponse:
     if task is None:
         return SummaryTaskResponse(state="idle", message="")
+    state = task.state
+    markdown, outdated = _summary(job_id) if state == "done" else (None, False)
     return SummaryTaskResponse(
-        state=task.state,
+        state=state,
         message=task.message,
         error=JobErrorPayload(**task.error) if task.error else None,
-        markdown=_summary(job_id)[0] if task.state == "done" else None,
+        markdown=markdown,
+        summary_outdated=outdated,
     )
 
 
@@ -402,12 +418,14 @@ def _run_summary(job_id: str, result: TranscriptionResult, title: str, task: _Su
         if task.cancel_event.is_set():
             raise JobCancelledError("Se canceló el resumen")
         progress("Preparando el resumen...")
+        revision = summarizer.source_revision(result)
         markdown = summarizer.summarize(result, title, progress, task.cancel_event)
         if task.cancel_event.is_set():
             raise JobCancelledError("Se canceló el resumen")
         if not folder.is_dir():
             raise summarizer.SummaryError("La transcripción se eliminó mientras se resumía")
-        atomic_write_text(folder / SUMMARY_FILE, markdown)
+        # Commit the revision and its summary together so they cannot get out of sync.
+        atomic_write_text(folder / SUMMARY_FILE, f"{_SUMMARY_REVISION_PREFIX}{revision} -->\n{markdown}")
         task.state, task.message = "done", "Resumen listo."
     except JobCancelledError as exc:
         task.state, task.message = "cancelled", exc.message
@@ -452,8 +470,9 @@ def create_summary(job_id: str) -> SummaryTaskResponse:
             return _summary_response(job_id, task)
         task = _SummaryTask()
         _SUMMARY_TASKS[job_id] = task
+    accepted = _summary_response(job_id, task)
     _SUMMARY_EXECUTOR.submit(_run_summary, job_id, job.result, title or job_id, task)
-    return _summary_response(job_id, task)
+    return accepted
 
 
 @router.get("/jobs/{job_id}/summary", response_model=SummaryTaskResponse)
@@ -546,11 +565,19 @@ def _result_schema(
 
 
 @router.get("/jobs/{job_id}/download/{fmt}")
-def download_export(job_id: str, fmt: str) -> FileResponse:
+def download_export(job_id: str, fmt: str) -> Response:
     _get_job(job_id)
     filename = _ALLOWED_EXPORT_FORMATS.get(fmt)
     if filename is None:
         raise HTTPException(status_code=404, detail="El formato de exportación no es compatible")
+    if fmt == "summary":
+        markdown, _ = _summary(job_id)
+        if markdown is None:
+            raise HTTPException(status_code=404, detail="No se encontró el archivo")
+        return Response(
+            markdown, media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="{SUMMARY_FILE}"'},
+        )
     path = settings.output_dir / job_id / filename
     if not path.exists():
         raise HTTPException(status_code=404, detail="No se encontró el archivo")

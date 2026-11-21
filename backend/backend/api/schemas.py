@@ -139,6 +139,7 @@ class SummaryTaskResponse(BaseModel):
     message: str = ""
     error: JobErrorPayload | None = None
     markdown: str | None = None
+    summary_outdated: bool = False
 
 
 class HealthResponse(BaseModel):

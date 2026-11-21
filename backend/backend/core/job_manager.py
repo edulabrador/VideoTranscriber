@@ -65,20 +65,20 @@ class JobManager:
         with self._lock:
             if job_id and job_id in self._jobs:
                 return self._jobs[job_id]
-            while len(self._jobs) >= self._max_jobs:
-                finished_id = next(
-                    (
-                        existing_id
-                        for existing_id, existing in self._jobs.items()
-                        if existing.status in _TERMINAL_STATUSES
-                    ),
-                    None,
-                )
-                if finished_id is None:
-                    break
-                self._jobs.pop(finished_id)
-            job = JobRecord(id=job_id or f"job_{uuid.uuid4().hex[:10]}", source=source, dedup_key=dedup_key)
-            self._jobs[job.id] = job
+            return self._register(job_id, source, dedup_key)
+
+    def _register(self, job_id: str | None, source: str, dedup_key: str) -> JobRecord:
+        """Add a job while holding the manager lock."""
+        while len(self._jobs) >= self._max_jobs:
+            finished_id = next(
+                (job.id for job in self._jobs.values() if job.status in _TERMINAL_STATUSES),
+                None,
+            )
+            if finished_id is None:
+                break
+            self._jobs.pop(finished_id)
+        job = JobRecord(id=job_id or f"job_{uuid.uuid4().hex[:10]}", source=source, dedup_key=dedup_key)
+        self._jobs[job.id] = job
         return job
 
     def get_job(self, job_id: str) -> JobRecord | None:
@@ -89,17 +89,17 @@ class JobManager:
         with self._lock:
             return list(self._jobs.values())
 
-    def find_active(self, dedup_key: str) -> JobRecord | None:
-        """An unfinished job for the same source and settings."""
+    def create_or_reuse(self, source: str, dedup_key: str, *, force: bool) -> tuple[JobRecord, bool]:
+        """Register or reuse a matching job atomically. Return whether it was created."""
         with self._lock:
-            return next(
-                (
-                    job for job in self._jobs.values()
-                    if job.dedup_key == dedup_key and job.status not in _TERMINAL_STATUSES
-                    and not job.cancel_event.is_set()
-                ),
-                None,
-            )
+            if not force:
+                for job in self._jobs.values():
+                    if (
+                        job.dedup_key == dedup_key and job.status not in _TERMINAL_STATUSES
+                        and not job.cancel_event.is_set()
+                    ):
+                        return job, False
+            return self._register(None, source, dedup_key), True
 
     def remove_job(self, job_id: str) -> None:
         with self._lock:

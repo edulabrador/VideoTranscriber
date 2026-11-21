@@ -22,7 +22,7 @@ export function SummaryPanel({
   jobId: string;
   summary: string | null | undefined;
   outdated: boolean;
-  onSummary: (markdown: string) => void;
+  onSummary: (markdown: string, outdated: boolean) => void;
 }) {
   const [status, setStatus] = useState<SummaryStatus | null>(null);
   const [task, setTask] = useState<SummaryTask | null>(null);
@@ -50,7 +50,11 @@ export function SummaryPanel({
     setError(null);
     getJson<SummaryTask>(`/api/jobs/${jobId}/summary`, controller.signal)
       .then((current) => {
+        if (controller.signal.aborted) return;
         if (current.state === "running") setTask(current);
+        if (current.state === "done" && current.markdown) {
+          onSummaryRef.current(current.markdown, Boolean(current.summary_outdated));
+        }
       })
       .catch(() => undefined);
     return () => controller.abort();
@@ -62,9 +66,10 @@ export function SummaryPanel({
     const timer = setTimeout(() => {
       getJson<SummaryTask>(`/api/jobs/${jobId}/summary`, controller.signal)
         .then((current) => {
+          if (controller.signal.aborted) return;
           setTask(current);
           if (current.state === "done" && current.markdown) {
-            onSummaryRef.current(current.markdown);
+            onSummaryRef.current(current.markdown, Boolean(current.summary_outdated));
           }
           if (current.state === "failed") {
             setError(current.error?.message ?? "No se pudo generar el resumen");
@@ -145,7 +150,7 @@ export function SummaryPanel({
       )}
       {summary && outdated && !running && (
         <p className="message warning" role="status">
-          Corregiste la transcripción después de crear este resumen. Vuelve a
+          La transcripción cambió desde que se preparó este resumen. Vuelve a
           resumir para actualizarlo.
         </p>
       )}

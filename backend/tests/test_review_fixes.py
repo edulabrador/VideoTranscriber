@@ -3,6 +3,7 @@ import json
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -14,6 +15,7 @@ from backend import cli
 from backend.api import app as app_module
 from backend.api import routes
 from backend.api.app import app
+from backend.api.schemas import CreateJobFromUrlRequest
 from backend.config import settings
 from backend.core import diarizer, downloader, pipeline
 from backend.core.errors import DownloadError, JobCancelledError
@@ -28,6 +30,27 @@ from backend.core.transcriber import (
 )
 
 LOCAL = {"base_url": "http://127.0.0.1", "client": ("127.0.0.1", 50000)}
+
+
+def test_concurrent_identical_requests_start_only_one_job(monkeypatch):
+    manager = JobManager()
+    barrier = threading.Barrier(8, timeout=5)
+    start = Mock()
+
+    def empty_cache(*_args):
+        barrier.wait()
+        return None
+
+    monkeypatch.setattr(routes, "job_manager", manager)
+    monkeypatch.setattr(routes.history_store, "find_cached", empty_cache)
+    monkeypatch.setattr(routes, "_start_background", start)
+    payload = CreateJobFromUrlRequest(url="https://youtu.be/abcdefghijk")
+    with ThreadPoolExecutor(max_workers=8) as workers:
+        results = list(workers.map(lambda _: routes.create_job_from_url(payload), range(8)))
+
+    assert len({result.id for result in results}) == 1
+    assert len(manager.list_jobs()) == 1
+    start.assert_called_once()
 
 
 def make_result(segments=None, text="hola adiós"):

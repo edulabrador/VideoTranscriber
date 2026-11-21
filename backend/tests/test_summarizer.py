@@ -141,7 +141,8 @@ def test_api_saves_and_returns_the_summary(summary_api, monkeypatch):
     assert done["markdown"].startswith("# Resumen de Vídeo")
     result = client.get("/api/jobs/job_s/result").json()
     assert result["summary"] == done["markdown"] and result["summary_outdated"] is False
-    assert client.get("/api/jobs/job_s/download/summary").status_code == 200
+    exported = client.get("/api/jobs/job_s/download/summary")
+    assert exported.status_code == 200 and exported.text == done["markdown"]
     monkeypatch.setattr(settings, "ollama_url", "http://127.0.0.1:9")
     down = client.post("/api/jobs/job_s/summary")
     assert down.status_code == 503 and down.json()["detail"]["code"] == "summary_failed"
@@ -156,6 +157,55 @@ def test_summary_is_marked_outdated_after_the_transcript_is_corrected(summary_ap
         "segments": [{"index": 0, "text": "Hola, corregido."}]})
     assert edited.status_code == 200
     assert edited.json()["summary_outdated"] is True
+
+
+def test_edit_during_summary_marks_old_input_and_regeneration_clears_warning(
+    summary_api, monkeypatch,
+):
+    client, _ = summary_api
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_summary(result, *_args):
+        started.set()
+        assert release.wait(5)
+        return result.text
+
+    monkeypatch.setattr(summarizer, "summarize", slow_summary)
+    assert client.post("/api/jobs/job_s/summary").json()["state"] == "running"
+    try:
+        assert started.wait(5)
+        edited = client.patch("/api/jobs/job_s/transcript", json={
+            "segments": [{"index": 0, "text": "Hola, corregido."}],
+        })
+        assert edited.status_code == 200
+    finally:
+        release.set()
+
+    done = _wait_summary(client, "job_s")
+    assert done["state"] == "done"
+    assert done["markdown"] == "Hola."
+    assert done["summary_outdated"] is True
+
+    # The warning is derived from the saved files even after the task is forgotten.
+    monkeypatch.setattr(routes, "_SUMMARY_TASKS", {})
+    restored = client.get("/api/jobs/job_s/result").json()
+    assert restored["summary"] == "Hola."
+    assert restored["summary_outdated"] is True
+    assert client.post("/api/jobs/job_s/summary").status_code == 202
+    regenerated = _wait_summary(client, "job_s")
+    assert regenerated["markdown"] == "Hola, corregido."
+    assert regenerated["summary_outdated"] is False
+
+
+def test_legacy_summary_remains_readable(summary_api):
+    client, store = summary_api
+    (store._output_dir / "job_s" / summarizer.SUMMARY_FILE).write_text(
+        "Resumen anterior", encoding="utf-8",
+    )
+    result = client.get("/api/jobs/job_s/result").json()
+    assert result["summary"] == "Resumen anterior"
+    assert result["summary_outdated"] is False
 
 
 def test_a_running_summary_is_never_started_twice_and_can_be_cancelled(summary_api, monkeypatch):
